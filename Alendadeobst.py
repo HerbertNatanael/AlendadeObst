@@ -8,3 +8,6 @@ while True:
     eventos = pygame.event.get()
     if eventos:
         print(eventos)
+
+
+# colocar comentários das origens dos códigos (gpt, youtube, etc)
