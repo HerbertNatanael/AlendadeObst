@@ -1,11 +1,15 @@
 # src/enemy.py
-# Diferentes tipos de inimigos com padrões simples:
-# - BasicEnemy: desce reto (HP = 1)
-# - ZigZagEnemy: desce com movimento sinusoidal (para os lados)
-# - FastEnemy: desce rápido (HP ainda 1)
-# - ShooterEnemy: desce e periodicamente dispara balas em direção ao player
+# Inimigos com imagens específicas por tipo (se existirem em assets/images).
+# Arquivos esperados:
+#   assets/images/enemy_basic.png
+#   assets/images/enemy_zigzag.png
+#   assets/images/enemy_fast.png
+#   assets/images/enemy_shooter.png
 #
-# Cada inimigo mantém `pos` (Vector2) para atualização suave.
+# Tamanhos recomendados (pixels):
+#   basic / zigzag / fast / shooter: 48x48 (ou 64x64 se preferir mais resolução)
+#
+# O código carrega cada imagem com convert_alpha() e aplica smoothscale para garantir o tamanho.
 
 import os
 import math
@@ -14,34 +18,54 @@ import pygame
 from src.bullet import Bullet
 
 ASSETS_IMAGES = os.path.join(os.path.dirname(__file__), "..", "assets", "images")
-ENEMY_IMAGE_PATH = os.path.join(ASSETS_IMAGES, "enemy_basic.png")
+# caminhos esperados (nomes exatos)
+ENEMY_BASIC_IMG = os.path.join(ASSETS_IMAGES, "enemy_basic.png")
+ENEMY_ZIGZAG_IMG = os.path.join(ASSETS_IMAGES, "enemy_zigzag.png")
+ENEMY_FAST_IMG = os.path.join(ASSETS_IMAGES, "enemy_fast.png")
+ENEMY_SHOOTER_IMG = os.path.join(ASSETS_IMAGES, "enemy_shooter.png")
 
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 800
 
+# função utilitária para carregar imagem com fallback
+def load_enemy_image(path, size=(48, 48), fallback_color=(180, 180, 220)):
+    if os.path.isfile(path):
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            img = pygame.transform.smoothscale(img, size)
+            return img
+        except Exception as e:
+            print(f"Aviso: falha ao carregar {path}: {e}")
+    # fallback: cria placeholder
+    surf = pygame.Surface(size, pygame.SRCALPHA)
+    w, h = size
+    pygame.draw.rect(surf, fallback_color, (0, int(h*0.15), w, int(h*0.7)), border_radius=int(min(size)/8))
+    pygame.draw.circle(surf, (110, 110, 160), (w//2, int(h*0.3)), int(min(size)/6))
+    return surf
+
 
 class Enemy(pygame.sprite.Sprite):
     """Classe base para inimigos — contém atributos comuns."""
-    def __init__(self, pos=(240, -50), hp=1):
+    def __init__(self, pos=(240, -50), hp=1, image=None):
         super().__init__()
         self.hp = hp
         self.pos = pygame.math.Vector2(pos)
-        self.image = pygame.Surface((48, 48), pygame.SRCALPHA)
-        pygame.draw.rect(self.image, (180, 180, 220), (0, 8, 48, 32), border_radius=6)
-        pygame.draw.circle(self.image, (110, 110, 160), (24, 14), 10)
+        # se image já fornecida, usa, senão fallback
+        if image is not None:
+            self.image = image
+        else:
+            self.image = load_enemy_image(ENEMY_BASIC_IMG, size=(48,48))
         self.rect = self.image.get_rect(center=pos)
 
     def take_damage(self, amount=1):
         """Aplica dano e mata se HP <= 0."""
         self.hp -= amount
         if self.hp <= 0:
-            self.kill()  # remove o sprite (Game lida com pontuação)
+            self.kill()
             return True
         return False
 
     def update(self, dt):
-        """Placeholder — subclasses implementam comportamento."""
-        # Atualizam rect a partir de pos (subclasses devem alterar pos)
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
 
@@ -49,10 +73,10 @@ class Enemy(pygame.sprite.Sprite):
 class BasicEnemy(Enemy):
     """Inimigo que desce em linha reta."""
     def __init__(self, pos=(240, -50), dy=120):
-        super().__init__(pos=pos, hp=1)
+        # tenta carregar imagem específica
+        img = load_enemy_image(ENEMY_BASIC_IMG, size=(48,48))
+        super().__init__(pos=pos, hp=1, image=img)
         self.dy = dy
-        # Se existir sprite customizado, poderíamos carregar aqui (mantivemos placeholder)
-        self.rect = self.image.get_rect(center=pos)
 
     def update(self, dt):
         self.pos.y += self.dy * dt
@@ -61,32 +85,30 @@ class BasicEnemy(Enemy):
 
 
 class ZigZagEnemy(Enemy):
-    """Inimigo que desce e faz movimento horizontal sinusoidal."""
-    def __init__(self, pos=(240, -50), dy=110, amplitude=70, frequency=1.2):
-        super().__init__(pos=pos, hp=1)
+    """Inimigo que desce com movimento sinusoidal horizontal."""
+    def __init__(self, pos=(240, -50), dy=110, amplitude=70, frequency=1.0):
+        img = load_enemy_image(ENEMY_ZIGZAG_IMG, size=(48,48), fallback_color=(170,200,220))
+        super().__init__(pos=pos, hp=1, image=img)
         self.dy = dy
         self.amplitude = amplitude
-        self.frequency = frequency  # oscilações por segundo
+        self.frequency = frequency
         self._time = 0.0
         self.base_x = pos[0]
-        self.rect = self.image.get_rect(center=pos)
 
     def update(self, dt):
         self._time += dt
-        # movimento vertical
         self.pos.y += self.dy * dt
-        # movimento horizontal sin/cos baseado em tempo
         self.pos.x = self.base_x + math.sin(2 * math.pi * self.frequency * self._time) * self.amplitude
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
 
 
 class FastEnemy(Enemy):
-    """Inimigo rápido, pouca resistência — pressiona o jogador a reagir."""
-    def __init__(self, pos=(240, -50), dy=220):
-        super().__init__(pos=pos, hp=1)
+    """Inimigo rápido (desce mais rápido)."""
+    def __init__(self, pos=(240, -50), dy=240):
+        img = load_enemy_image(ENEMY_FAST_IMG, size=(48,48), fallback_color=(220,170,170))
+        super().__init__(pos=pos, hp=1, image=img)
         self.dy = dy
-        self.rect = self.image.get_rect(center=pos)
 
     def update(self, dt):
         self.pos.y += self.dy * dt
@@ -97,30 +119,28 @@ class FastEnemy(Enemy):
 class ShooterEnemy(Enemy):
     """
     Inimigo que atira em direção ao jogador.
-    Recebe referência ao player para mirar corretamente.
+    Gera uma bala (Bullet) apontando para player_ref e disponibiliza via _pending_bullet.
     """
     def __init__(self, pos=(240, -50), dy=90, shoot_cooldown=1.6, bullet_speed=220, player_ref=None):
-        super().__init__(pos=pos, hp=2)  # dá um pouco mais de HP
+        img = load_enemy_image(ENEMY_SHOOTER_IMG, size=(48,48), fallback_color=(200,200,160))
+        super().__init__(pos=pos, hp=2, image=img)
         self.dy = dy
         self.shoot_cooldown = shoot_cooldown
         self._last_shot = -999.0
         self.bullet_speed = bullet_speed
         self.player_ref = player_ref
-        self.rect = self.image.get_rect(center=pos)
+        self._pending_bullet = None
 
     def update(self, dt):
-        # movimento vertical similar ao basic
         self.pos.y += self.dy * dt
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
 
-        # tenta atirar se houver player e cooldown estiver pronto
         if self.player_ref is None:
             return
 
         now = time.perf_counter()
         if now - self._last_shot >= self.shoot_cooldown:
-            # mira na posição atual do player
             px, py = self.player_ref.rect.center
             sx, sy = self.rect.center
             dx = px - sx
@@ -128,23 +148,19 @@ class ShooterEnemy(Enemy):
             dist = math.hypot(dx, dy)
             if dist == 0:
                 dist = 1.0
-            # normaliza e aplica velocidade
             vx = dx / dist * self.bullet_speed
             vy = dy / dist * self.bullet_speed
-            # cria bala inimiga (owner='enemy')
-            bullet = Bullet(pos=self.rect.center, vx=vx, vy=vy, owner="enemy")
-            # Para evitar import circular, a adição das balas ao grupo será feita
-            # pelo Game: ShooterEnemy retornará a bala, e o Game adiciona onde for necessário.
-            # Aqui vamos guardar a última bala criada no objeto para que o Game possa buscar
-            # ou o Game chamará um método para obter la bala. Para simplificar, salvamos
-            # em self._pending_bullet e atualizamos _last_shot.
-            self._pending_bullet = bullet
+            try:
+                bullet = Bullet(pos=self.rect.center, vx=vx, vy=vy, owner="enemy")
+                self._pending_bullet = bullet
+            except Exception as e:
+                print(f"Aviso: falha ao criar bala do ShooterEnemy: {e}")
+                self._pending_bullet = None
             self._last_shot = now
         else:
             self._pending_bullet = None
 
     def pop_pending_bullet(self):
-        """Retorna (e limpa) a última bala criada pelo inimigo, ou None."""
-        b = getattr(self, "_pending_bullet", None)
+        b = self._pending_bullet
         self._pending_bullet = None
         return b
