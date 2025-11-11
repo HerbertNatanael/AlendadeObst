@@ -1,5 +1,7 @@
 # src/player.py
-# Player sprite com movimento (WASD / setas) e método de disparo (shoot).
+# Versão corrigida: cria Bullet usando vx/vy explicitamente (compatível com Bullet atual)
+# e protege a chamada para evitar que um erro feche o jogo.
+
 import os
 import pygame
 import time
@@ -12,7 +14,7 @@ class Player(pygame.sprite.Sprite):
         super().__init__()
         self.speed = 300  # pixels por segundo
 
-        # Tenta carregar sprite; senão, cria placeholder gráfico.
+        # Carrega sprite se existir, senão placeholder
         if os.path.isfile(PLAYER_IMAGE_PATH):
             img = pygame.image.load(PLAYER_IMAGE_PATH).convert_alpha()
             self.image = pygame.transform.smoothscale(img, (64, 64))
@@ -27,10 +29,9 @@ class Player(pygame.sprite.Sprite):
 
         # Disparo - cooldown
         self.shoot_cooldown = 0.25  # segundos entre tiros
-        self._last_shot_time = -999.0  # timestamp do último tiro (inicial muito no passado)
+        self._last_shot_time = -999.0  # timestamp do último tiro
 
     def update(self, dt):
-        """Atualiza posição do player (chamado pelo game loop)."""
         keys = pygame.key.get_pressed()
         dx = dy = 0
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
@@ -42,38 +43,46 @@ class Player(pygame.sprite.Sprite):
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             dy = 1
 
-        # Normaliza diagonal
         if dx != 0 and dy != 0:
             import math
             dx *= math.sqrt(0.5)
             dy *= math.sqrt(0.5)
 
-        # Movimento aplicado com dt
         self.rect.x += int(dx * self.speed * dt)
         self.rect.y += int(dy * self.speed * dt)
-
-        # Mantém dentro da tela
         self.rect.clamp_ip(self.screen_rect)
 
     def shoot(self):
         """
-        Tenta criar e retornar uma Bullet se o cooldown já passou.
-        Retorna:
-            Bullet instance ou None (se ainda estiver em cooldown).
-        Observação: o Game chama player.shoot() e, se não for None,
-        adiciona a bala aos grupos apropriados e toca som.
+        Cria e retorna uma Bullet se o cooldown já passou.
+        Utiliza vx/vy e owner para compatibilidade com a implementação atual de Bullet.
+        Retorna None se em cooldown ou em caso de erro.
         """
         now = time.perf_counter()
         if now - self._last_shot_time < self.shoot_cooldown:
             return None  # ainda em cooldown
 
-        # atualiza o tempo do último disparo
         self._last_shot_time = now
 
-        # Importamos aqui para evitar import circular (Game -> Player -> Bullet)
-        from src.bullet import Bullet
+        # Import dinâmico para evitar import circular no topo
+        try:
+            from src.bullet import Bullet
+        except Exception as e:
+            # Se por algum motivo não for possível importar Bullet, não fechar o jogo.
+            print(f"Aviso: não foi possível importar Bullet: {e}")
+            return None
 
-        # Cria a bala na posição do topo do navio (ajuste visual)
+        # Cria a bala explicitamente com vx=0 e vy negativo (sobe)
         bullet_pos = (self.rect.centerx, self.rect.top - 8)
-        bullet = Bullet(pos=bullet_pos, dy=-600)  # dy negativo -> sobem rápido
+        try:
+            bullet = Bullet(pos=bullet_pos, vx=0.0, vy=-600.0, owner="player")
+        except TypeError:
+            # Caso a assinatura da Bullet seja diferente (defensivo), tenta criar de forma compatível
+            try:
+                # tentativa compatível com versões antigas que aceitam (pos, dy)
+                bullet = Bullet(bullet_pos, -600.0)
+            except Exception as e:
+                print(f"Aviso: falha ao criar Bullet: {e}")
+                return None
+
         return bullet
