@@ -4,8 +4,7 @@
 # - Som de tiro (assets/sounds/shot.wav) — opcional, tratado com gracefulness.
 # - Tela de pausa (toggle com ESC) — pausa updates, spawn e disparo.
 # - Dificuldade dinâmica: spawn_interval diminui gradualmente com o tempo.
-#
-# Comentários explicativos incluídos para facilitar entendimento.
+# Comentários explicativos incluídos.
 
 import os
 import random
