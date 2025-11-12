@@ -351,9 +351,16 @@ class Game:
     def update(self, dt):
         # update sprites
         try:
-            self.all_sprites.update(dt)
+            self.all_sprites.update(dt) 
         except Exception:
             pass
+        # adiciona tiros recém-criados do boss
+        for enemy in list(self.enemies_group):
+            if isinstance(enemy, BossEnemy) and getattr(enemy, "new_bullets", None):
+                for b in enemy.new_bullets:
+                    self.all_sprites.add(b)
+                    self.enemy_bullets_group.add(b)
+                enemy.new_bullets.clear()
 
         # collect pending bullets from shooter enemies
         for enemy in list(self.enemies_group):
