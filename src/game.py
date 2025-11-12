@@ -1,8 +1,9 @@
 # src/game.py
 # Atualizado para:
-# - passar player_ref aos inimigos (para que possam mirar/seguir)
-# - checar colisões inimigo <-> player (dano e remoção do inimigo)
-# - manter comportamento de balas de inimigos, pausa, som, HUD, dificuldade dinâmica
+# - não penalizar o jogador quando inimigos saem pelo fundo da tela;
+# - manter penalidades apenas quando inimigo colide com o player
+#   ou quando uma bala inimiga acerta o player.
+# Mantém spawn, tiros, pause, dificuldade e demais funcionalidades.
 
 import os
 import random
@@ -115,7 +116,7 @@ class Game:
                     pass
 
     def update(self, dt):
-        # atualiza sprites (player, balas, inimigos...)
+        # atualiza todos os sprites (player, balas, inimigos...)
         self.all_sprites.update(dt)
 
         # recolhe balas pendentes dos shooters e adiciona aos grupos
@@ -139,10 +140,13 @@ class Game:
         self.difficulty_timer += dt
         if self.difficulty_timer >= self.difficulty_period:
             self.difficulty_timer -= self.difficulty_period
-            self.spawn_interval = max(self.spawn_interval * self.difficulty_reduction_factor,
-                                      self.spawn_interval_min)
+            new_interval = max(self.spawn_interval * self.difficulty_reduction_factor,
+                               self.spawn_interval_min)
+            if new_interval < self.spawn_interval:
+                print(f"Aumentando dificuldade: spawn_interval {self.spawn_interval:.3f} -> {new_interval:.3f}")
+            self.spawn_interval = new_interval
 
-        # colisões: balas do jogador vs inimigos (balas desaparecem, inimigo toma dano)
+        # colisões: balas do jogador vs inimigos
         collisions = pygame.sprite.groupcollide(self.bullets_group, self.enemies_group, True, False)
         if collisions:
             for bullet, enemies_hit in collisions.items():
@@ -154,7 +158,7 @@ class Game:
                     if died:
                         self.score += 10
 
-        # colisões: balas inimigas vs player
+        # colisões: balas inimigas vs player (penaliza vida)
         hits = pygame.sprite.groupcollide(self.enemy_bullets_group, self.player_group, True, False)
         if hits:
             for bullet, players in hits.items():
@@ -166,13 +170,12 @@ class Game:
                     self.running = False
                     return
 
-        # NOVO: colisões entre inimigos e player — causam dano e removem o inimigo
-        # (evita múltiplos danos seguidos ao matar o inimigo imediatamente)
+        # colisões entre inimigos e player — causam dano e removem o inimigo
         enemy_hits = pygame.sprite.spritecollide(self.player, self.enemies_group, dokill=False)
         if enemy_hits:
             for enemy in enemy_hits:
                 try:
-                    # ao colidir, removemos o inimigo (kill) e reduzimos vida
+                    # removemos o inimigo ao colidir para evitar múltiplos acertos
                     enemy.kill()
                 except Exception:
                     pass
@@ -184,17 +187,13 @@ class Game:
                     self.running = False
                     return
 
-        # inimigos que fogem pela parte inferior da tela -> penalidade
+        # inimigos que passam pelo fundo da tela: removemos para não acumular,
+        # mas NÃO penalizamos o jogador conforme sua solicitação.
+        # Mantemos kill() para liberar memória/objetos.
         for enemy in list(self.enemies_group):
             if enemy.rect.top > SCREEN_HEIGHT:
                 enemy.kill()
-                self.lives -= 1
-                print(f"Inimigo escapou! Vidas restantes: {self.lives}")
-                if self.lives <= 0:
-                    self.display_game_over()
-                    pygame.time.delay(2000)
-                    self.running = False
-                    return
+                # Nenhuma alteração em self.lives aqui (intencional)
 
     def spawn_enemy(self):
         # probabilidade base (igual à versão anterior)
