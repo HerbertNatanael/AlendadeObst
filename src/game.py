@@ -1,8 +1,8 @@
 # src/game.py
-# Jogo principal atualizado:
-# - Texto de vitória menor e centralizado
-# - HUD: "Tempo para o Boss: Xs" abaixo do tempo
-# - Hitbox do player reduzida em 50% (aplicado nas verificações de colisão)
+# Jogo principal — versão atualizada:
+# - remove painel escuro e título textual do menu (mantém apenas title_image)
+# - centraliza definitivamente a mensagem de vitória e mostra obst.png abaixo dela
+# - mantém música de vitória até o jogador pressionar R
 #
 import os
 import random
@@ -30,7 +30,7 @@ BOSS_APPEAR_PATH = os.path.join(SOUNDS_DIR, "boss_appear.mp3")       # opcional
 VICTORY_MUSIC_PATH = os.path.join(SOUNDS_DIR, "victory_music.mp3")  # opcional
 
 OBST_IMAGE_PATH = os.path.join(IMAGES_DIR, "obst.png")               # imagem do drop
-VICTORY_IMAGE_PATH = os.path.join(IMAGES_DIR, "victory_image.png")  # imagem mostrada na vitória
+VICTORY_IMAGE_PATH = os.path.join(IMAGES_DIR, "victory_image.png")  # (não obrigatório)
 
 BOSS_HP_BAR_RECT = pygame.Rect(12, 12, 360, 18)
 BOSS_NAME = "Boss final"
@@ -142,7 +142,7 @@ class Game:
         self.start_button_rect = pygame.Rect((SCREEN_WIDTH // 2 - btn_w // 2,
                                               SCREEN_HEIGHT - 220, btn_w, btn_h))
 
-        # title image (optional)
+        # title image (optional) — logo grande; menu agora *usa só esta imagem*
         self.title_image = None
         TITLE_IMAGE_PATH = os.path.join(IMAGES_DIR, "title_image.png")
         if os.path.isfile(TITLE_IMAGE_PATH):
@@ -555,7 +555,7 @@ class Game:
 
         # draw menu OR gameplay
         if self.state == "menu":
-            # draw menu only (no HUD/sprites)
+            # draw menu only (no HUD/sprites) — now WITHOUT panel e sem título textual
             try:
                 self._draw_menu()
             except Exception as e:
@@ -597,29 +597,15 @@ class Game:
         pygame.display.flip()
 
     def _draw_menu(self):
-        # subtle panel to highlight menu UI
-        panel = pygame.Surface((SCREEN_WIDTH - 40, SCREEN_HEIGHT - 80), pygame.SRCALPHA)
-        panel.fill((0, 0, 0, 80))
-        panel_rect = panel.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
-        self.screen.blit(panel, panel_rect)
-
-        # title text
-        title_surf = self.font_title.render("Pirata — O Tesouro", True, (240, 240, 220))
-        title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, 72))
-        self.screen.blit(title_surf, title_rect)
-
-        # title image (if available)
+        """
+        Menu simplificado: não desenha painel escuro nem título textual.
+        Mostra apenas a title_image (se existir), o botão START e instruções.
+        """
+        # fundo já desenhado; só colocamos a imagem do título maior (logo)
         if self.title_image is not None:
-            ti_rect = self.title_image.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 70))
+            # centralizar mais alto para dar espaço ao botão/instruções
+            ti_rect = self.title_image.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 120))
             self.screen.blit(self.title_image, ti_rect)
-        else:
-            # visible placeholder
-            ph_w, ph_h = 300, 140
-            ph = pygame.Surface((ph_w, ph_h))
-            ph.fill((180, 160, 100))
-            pygame.draw.rect(ph, (140, 120, 80), ph.get_rect(), 4)
-            ph_rect = ph.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 70))
-            self.screen.blit(ph, ph_rect)
 
         # start button with shadow, hover, border
         mx, my = pygame.mouse.get_pos()
@@ -636,7 +622,7 @@ class Game:
         btn_text = self.font_button.render("START", True, (255, 255, 255))
         self.screen.blit(btn_text, btn_text.get_rect(center=rect.center))
 
-        # instructions
+        # instructions (mantém posição)
         y0 = rect.bottom + 14
         for i, line in enumerate(self.instructions):
             surf = self.font_instruct.render(line, True, (230, 230, 230))
@@ -681,7 +667,7 @@ class Game:
 
     # ----------------- victory sequence -----------------
     def trigger_victory(self):
-        """Toca victory_music (se existir) e mostra mensagem + imagem; volta ao menu."""
+        """Toca victory_music (se existir) e mostra mensagem + obst abaixo; espera R para voltar ao menu."""
         # stop any music playing (game music already stopped on boss spawn, but be safe)
         try:
             pygame.mixer.music.stop()
@@ -704,50 +690,55 @@ class Game:
             except Exception as e:
                 print(f"Aviso: falha ao tocar victory_music: {e}")
 
-        # try to load victory image
-        victory_surf = None
-        if os.path.isfile(VICTORY_IMAGE_PATH):
+        # try to load obst image (will be shown below the message)
+        obst_surf = None
+        if os.path.isfile(OBST_IMAGE_PATH):
             try:
-                img = pygame.image.load(VICTORY_IMAGE_PATH).convert_alpha()
-                # scale to fit
-                maxw, maxh = SCREEN_WIDTH - 120, SCREEN_HEIGHT - 240
+                img = pygame.image.load(OBST_IMAGE_PATH).convert_alpha()
+                # scale a bit larger for the victory screen
+                maxw, maxh = 160, 160
                 w, h = img.get_size()
                 scale = min(1.0, maxw / w if w > 0 else 1.0, maxh / h if h > 0 else 1.0)
                 if scale < 1.0:
                     img = pygame.transform.smoothscale(img, (int(w * scale), int(h * scale)))
-                victory_surf = img
+                obst_surf = img
             except Exception as e:
-                print(f"Aviso: falha ao carregar victory image: {e}")
-                victory_surf = None
+                print(f"Aviso: falha ao carregar {OBST_IMAGE_PATH}: {e}")
+                obst_surf = None
 
-        if victory_surf is None:
-            # fallback placeholder
-            vs = pygame.Surface((360, 180))
-            vs.fill((30, 30, 30))
-            pygame.draw.rect(vs, (200, 200, 200), vs.get_rect(), 3)
-            victory_surf = vs
+        # fallback image (small box) if obst not present
+        if obst_surf is None:
+            vs = pygame.Surface((96, 96))
+            vs.fill((200, 180, 60))
+            pygame.draw.rect(vs, (140, 110, 20), vs.get_rect(), 4)
+            obst_surf = vs
 
-        # fade to dark and display message + image for a few seconds
-        fade_time = 1.2
-        display_time = 4.0
-        start = time.perf_counter()
-        clock = pygame.time.Clock()
-
-        # positions: image above center, text centered in middle (smaller)
-        image_center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 80)
-        text_center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+        # prepare positions: message at exact center, obst below, instruction further below
+        message_center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40)
+        obst_center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 40)
+        instr_center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 120)
 
         msg = "Parabéns, você conquistou a Obst, a fruta sagrada dos sete mares!"
-        # agora menor (fonte 18) e centralizado
-        victory_font = pygame.font.SysFont(FONT_NAME, 18, bold=True)
+        victory_font = pygame.font.SysFont(FONT_NAME, 20, bold=True)
+        instr_font = pygame.font.SysFont(FONT_NAME, 16)
 
-        while True:
-            now = time.perf_counter()
-            elapsed = now - start
+        waiting = True
+        # loop até o jogador pressionar R ou fechar a janela
+        while waiting and self.running:
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     self.running = False
-                    return
+                    waiting = False
+                    break
+                if ev.type == pygame.KEYDOWN:
+                    if ev.key == pygame.K_r:
+                        waiting = False
+                        break
+                if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                    # opcional: também permitir clique para confirmar (se quiser)
+                    # atualmente mantemos só R — remova comentário abaixo para aceitar clique:
+                    # waiting = False
+                    pass
 
             # draw background darkened
             if self.background:
@@ -758,30 +749,31 @@ class Game:
             else:
                 self.screen.fill((10, 10, 10))
 
-            # dark overlay (progressive)
-            alpha = min(1.0, elapsed / fade_time)
+            # dark overlay (static semi-transparent)
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
             overlay.fill((0, 0, 0))
-            overlay.set_alpha(int(alpha * 220))
+            overlay.set_alpha(200)
             self.screen.blit(overlay, (0, 0))
 
-            # draw victory image (above center)
-            rect = victory_surf.get_rect(center=image_center)
-            self.screen.blit(victory_surf, rect)
-
-            # draw message centered (menor e no meio da tela)
+            # draw message centered (definitivamente centralizado)
             text_surf = victory_font.render(msg, True, (255, 230, 120))
-            text_rect = text_surf.get_rect(center=text_center)
+            text_rect = text_surf.get_rect(center=message_center)
             self.screen.blit(text_surf, text_rect)
 
+            # draw obst below message
+            obst_rect = obst_surf.get_rect(center=obst_center)
+            self.screen.blit(obst_surf, obst_rect)
+
+            # draw instruction to return to menu
+            instr = "Pressione R para voltar ao menu inicial"
+            instr_surf = instr_font.render(instr, True, (220, 220, 220))
+            instr_rect = instr_surf.get_rect(center=instr_center)
+            self.screen.blit(instr_surf, instr_rect)
+
             pygame.display.flip()
+            self.clock.tick(30)
 
-            if elapsed >= fade_time + display_time:
-                break
-
-            clock.tick(30)
-
-        # stop victory music and return to menu
+        # ao sair da tela de vitória (R ou quit): parar música, limpar e voltar ao menu
         try:
             pygame.mixer.music.stop()
         except Exception:
