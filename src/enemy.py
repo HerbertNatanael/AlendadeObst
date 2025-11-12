@@ -1,12 +1,7 @@
 # src/enemy.py
 # Inimigos com animação yaw/pitch e BossEnemy (movimento horizontal + HP alto)
 #
-# Assets opcionais:
-#   assets/images/enemy_basic.png
-#   assets/images/enemy_zigzag.png
-#   assets/images/enemy_fast.png
-#   assets/images/enemy_shooter.png
-#   assets/images/boss.png          <- imagem opcional do boss
+# Opcional: assets/images/boss.png (se presente será usado)
 #
 import os
 import math
@@ -24,7 +19,7 @@ BOSS_IMG = os.path.join(ASSETS_IMAGES, "boss.png")
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 800
 
-# Visual tuning
+# visual tuning
 SPRITE_DRAW_SIZE = (48, 48)
 MAX_HORIZ_SCALE = 0.72
 MAX_YAW_ROT_DEG = 12.0
@@ -35,6 +30,7 @@ HEALTH_BAR_MARGIN = 4
 
 
 def load_enemy_image(path, size=SPRITE_DRAW_SIZE, fallback_color=(180, 180, 220)):
+    """Tenta carregar e escalar imagem; se não existir cria placeholder."""
     if os.path.isfile(path):
         try:
             img = pygame.image.load(path).convert_alpha()
@@ -50,6 +46,7 @@ def load_enemy_image(path, size=SPRITE_DRAW_SIZE, fallback_color=(180, 180, 220)
 
 
 class Enemy(pygame.sprite.Sprite):
+    """Base para inimigos com animação visual (yaw/pitch)."""
     def __init__(self, pos=(240, -50), hp=1, image=None, player_ref=None, size=SPRITE_DRAW_SIZE):
         super().__init__()
         self.hp = hp
@@ -66,11 +63,13 @@ class Enemy(pygame.sprite.Sprite):
         self.image = self.original_image.copy()
         self.rect = self.image.get_rect(center=pos)
 
+        # visual state
         self.yaw_value = 0.0
         self.target_yaw_value = 0.0
         self.pitch_value = 0.0
         self.target_pitch_value = 0.0
 
+        # velocities for visual
         self.vx = 0.0
         self.vy = 0.0
 
@@ -82,6 +81,7 @@ class Enemy(pygame.sprite.Sprite):
         return False
 
     def _update_visual_targets(self, dt):
+        """Define target yaw/pitch a partir de vx/vy e interpola suavemente."""
         if abs(self.vx) < 0.01:
             desired_yaw = 0.0
         else:
@@ -100,6 +100,7 @@ class Enemy(pygame.sprite.Sprite):
         self.pitch_value += (self.target_pitch_value - self.pitch_value) * interp
 
     def _apply_visual_transform(self, include_health_bar=False):
+        """Aplica compressão horizontal + rotação 2D baseada em yaw/pitch e opcionalmente desenha barra."""
         yaw = self.yaw_value
         abs_yaw = abs(yaw)
         horiz_scale = 1.0 - (1.0 - MAX_HORIZ_SCALE) * abs_yaw
@@ -124,9 +125,7 @@ class Enemy(pygame.sprite.Sprite):
             combined_w = rotated.get_width()
             combined_h = rotated.get_height() + bar_h
             combined = pygame.Surface((combined_w, combined_h), pygame.SRCALPHA)
-            sprite_x = 0
-            sprite_y = bar_h
-            combined.blit(rotated, (sprite_x, sprite_y))
+            combined.blit(rotated, (0, bar_h))
             bar_w = int(combined_w * 0.9)
             bar_x = (combined_w - bar_w) // 2
             bar_y = HEALTH_BAR_MARGIN // 2
@@ -304,13 +303,13 @@ class ShooterEnemy(Enemy):
 class BossEnemy(Enemy):
     """
     Boss final:
-    - aparece centralizado, desce lentamente até posição inicial (y = boss_start_y)
-    - depois se move apenas horizontalmente entre limites (bounce)
-    - maior tamanho que inimigos normais; exibe HP no topo-left via Game.draw
+    - aparece centralizado, desce lentamente até posição inicial (start_y)
+    - depois move-se apenas na horizontal (bounce entre limites)
+    - maior tamanho que inimigos normais; tem hp alto.
     """
-    def __init__(self, pos=(SCREEN_WIDTH//2, -200), dy=50, start_y=120, hp=40, speed_x=120, player_ref=None):
-        boss_size = (120, 80)  # largura maior e altura aumentada
-        # tenta carregar boss.png com escala, se não existir usa placeholder
+    def __init__(self, pos=(SCREEN_WIDTH//2, -220), dy=60, start_y=120, hp=40, speed_x=140, player_ref=None):
+        boss_size = (120, 80)  # maior que inimigos
+        # tenta carregar boss.png se existir
         if os.path.isfile(BOSS_IMG):
             try:
                 img = pygame.image.load(BOSS_IMG).convert_alpha()
@@ -328,18 +327,18 @@ class BossEnemy(Enemy):
         self.speed_x = speed_x
         self.vx = 0.0
         self.vy = 0.0
-        # horizontal movement bounds (keep boss within screen edges with margin)
         margin = 40
         self.min_x = margin
         self.max_x = SCREEN_WIDTH - margin - boss_size[0]
-        # set initial pos.x to center correctly
+        # pos is provided as center x; convert to topleft pos.x
         self.pos.x = pos[0] - boss_size[0] // 2
         self.pos.y = pos[1]
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
+        self._prev_rect_x = self.rect.x
 
     def update(self, dt):
-        # if not yet at start_y, descend slowly
+        # descend first
         if not self.descended:
             if self.pos.y < self.start_y:
                 self.pos.y += self.dy * dt
@@ -347,12 +346,11 @@ class BossEnemy(Enemy):
             else:
                 self.pos.y = self.start_y
                 self.descended = True
-                # start horizontal movement right
-                self.vx = self.speed_x
+                # start horizontal movement to the right
+                self.vx = abs(self.speed_x)
         else:
-            # horizontal movement bounce
+            # horizontal movement with bounce
             self.pos.x += self.vx * dt
-            # bounce when hitting bounds
             if self.pos.x < self.min_x:
                 self.pos.x = self.min_x
                 self.vx = abs(self.vx)
@@ -360,19 +358,14 @@ class BossEnemy(Enemy):
                 self.pos.x = self.max_x
                 self.vx = -abs(self.vx)
 
-        # update rect
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
 
-        # set visual velocities for yaw calc
-        self._update_visual_velocities(dt)
-        self._update_visual_targets(dt)
-        # Boss shows health via Game.draw (top-left); still apply visual transform for movement look
-        self._apply_visual_transform(include_health_bar=False)
-
-    def _update_visual_velocities(self, dt):
-        # approximate vx for visual yaw calculation
+        # compute approximate visual vx for yaw
         self.vx = (self.rect.x - getattr(self, "_prev_rect_x", self.rect.x)) / max(1e-6, dt)
         self.vy = 0.0
         self._prev_rect_x = self.rect.x
 
+        self._update_visual_targets(dt)
+        # Boss shows HP via Game.draw; still apply transform for visuals
+        self._apply_visual_transform(include_health_bar=False)

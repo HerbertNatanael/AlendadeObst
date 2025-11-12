@@ -1,21 +1,18 @@
 # src/game.py
-# Jogo completo com:
-# - Tela inicial (imagem PNG, botão START, instruções)
-# - Parallax background
-# - Música do menu e música do gameplay (diferentes)
-# - Pausa, HUD e todas as funcionalidades anteriores
+# Jogo principal: menu robusto + parallax + música do menu/gameplay + boss final.
+# Substitua este arquivo inteiro em seu projeto.
 
 import os
 import random
+import time
 import pygame
+
 from src.player import Player
 from src.bullet import Bullet
-from src.enemy import BasicEnemy, ZigZagEnemy, FastEnemy, ShooterEnemy
+from src.enemy import BasicEnemy, ZigZagEnemy, FastEnemy, ShooterEnemy, BossEnemy
 from src.background import ParallaxBackground
 
-# ------------------------------------------------------------
-# CONFIGURAÇÕES GERAIS
-# ------------------------------------------------------------
+# ----------------- Configurações -----------------
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 800
 FPS = 60
@@ -25,22 +22,15 @@ SOUNDS_DIR = os.path.join(ASSETS_DIR, "sounds")
 IMAGES_DIR = os.path.join(ASSETS_DIR, "images")
 
 SHOT_SOUND_PATH = os.path.join(SOUNDS_DIR, "shot.wav")
-MENU_MUSIC_PATH = os.path.join(SOUNDS_DIR, "menu_music.mp3")      # música do menu
-GAME_MUSIC_PATH = os.path.join(SOUNDS_DIR, "game_music.mp3")      # música do gameplay
-TITLE_IMAGE_PATH = os.path.join(IMAGES_DIR, "title_image.png")    # imagem do menu
-
-# UI do menu
-MENU_BG_COLOR = (8, 30, 70)
-BUTTON_COLOR = (28, 160, 100)
-BUTTON_HOVER_COLOR = (40, 200, 130)
-BUTTON_TEXT_COLOR = (255, 255, 255)
-INSTRUCTIONS_COLOR = (230, 230, 230)
-TITLE_IMAGE_MAX_SIZE = (360, 240)
+MENU_MUSIC_PATH = os.path.join(SOUNDS_DIR, "menu_music.mp3")
+GAME_MUSIC_PATH = os.path.join(SOUNDS_DIR, "game_music.mp3")
+# victory music/image may exist in assets but not required here
+BOSS_HP_BAR_RECT = pygame.Rect(12, 12, 360, 18)
+BOSS_NAME = "Boss final"
+FONT_NAME = "arial"
 
 
-# ------------------------------------------------------------
-# CLASSE PRINCIPAL DO JOGO
-# ------------------------------------------------------------
+# ----------------- Game class -----------------
 class Game:
     def __init__(self):
         pygame.init()
@@ -54,14 +44,10 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
 
-        # estado do app
-        self.state = "menu"
-
         # background parallax
         try:
             self.background = ParallaxBackground(screen_size=(SCREEN_WIDTH, SCREEN_HEIGHT),
-                                                 water_speed=90.0,
-                                                 side_speed=45.0)
+                                                 water_speed=90.0, side_speed=45.0)
         except Exception as e:
             print(f"Aviso: falha ao criar ParallaxBackground: {e}")
             self.background = None
@@ -78,30 +64,39 @@ class Game:
         self.menu_music = MENU_MUSIC_PATH if os.path.isfile(MENU_MUSIC_PATH) else None
         self.game_music = GAME_MUSIC_PATH if os.path.isfile(GAME_MUSIC_PATH) else None
 
-        # imagem do título
-        self.title_image = None
-        if os.path.isfile(TITLE_IMAGE_PATH):
-            try:
-                img = pygame.image.load(TITLE_IMAGE_PATH).convert_alpha()
-                w, h = img.get_size()
-                maxw, maxh = TITLE_IMAGE_MAX_SIZE
-                scale = min(maxw / w if w > 0 else 1.0, maxh / h if h > 0 else 1.0, 1.0)
-                if scale < 1.0:
-                    img = pygame.transform.smoothscale(img, (int(w * scale), int(h * scale)))
-                self.title_image = img
-            except Exception as e:
-                print(f"Aviso: falha ao carregar {TITLE_IMAGE_PATH}: {e}")
-                self.title_image = None
+        # --- menu assets & UI ---
+        self.state = "menu"  # garante que iniciamos no menu
+        self.menu_playing = False
 
-        # fontes e UI
-        self.font_title = pygame.font.SysFont("arial", 36, bold=True)
-        self.font_button = pygame.font.SysFont("arial", 28, bold=True)
-        self.font_instruct = pygame.font.SysFont("arial", 18)
-
+        # start button
         btn_w, btn_h = 220, 56
         self.start_button_rect = pygame.Rect((SCREEN_WIDTH // 2 - btn_w // 2,
                                               SCREEN_HEIGHT - 220, btn_w, btn_h))
 
+        # title image (optional)
+        self.title_image = None
+        TITLE_IMAGE_PATH = os.path.join(IMAGES_DIR, "title_image.png")
+        if os.path.isfile(TITLE_IMAGE_PATH):
+            try:
+                img = pygame.image.load(TITLE_IMAGE_PATH).convert_alpha()
+                w, h = img.get_size()
+                maxw, maxh = (360, 240)
+                scale = min(1.0, maxw / w if w > 0 else 1.0, maxh / h if h > 0 else 1.0)
+                if scale < 1.0:
+                    img = pygame.transform.smoothscale(img, (int(w * scale), int(h * scale)))
+                self.title_image = img
+            except Exception as e:
+                print(f"Aviso: falha ao carregar title_image.png: {e}")
+                self.title_image = None
+
+        # fonts
+        self.font_title = pygame.font.SysFont(FONT_NAME, 36, bold=True)
+        self.font_button = pygame.font.SysFont(FONT_NAME, 28, bold=True)
+        self.font_instruct = pygame.font.SysFont(FONT_NAME, 18)
+        self.font = pygame.font.SysFont(FONT_NAME, 20)
+        self.font_boss = pygame.font.SysFont(FONT_NAME, 18, bold=True)
+
+        # instructions text
         self.instructions = [
             "INSTRUÇÕES:",
             "- Clique com o botão esquerdo para atirar para o mouse",
@@ -110,13 +105,13 @@ class Game:
             "- Pressione ESC para pausar"
         ]
 
-        # variáveis do jogo
+        # ----------------- game state -----------------
         self.score = 0
         self.lives = 3
         self.total_time = 0.0
         self.paused = False
 
-        # grupos
+        # groups
         self.all_sprites = pygame.sprite.Group()
         self.player_group = pygame.sprite.Group()
         self.bullets_group = pygame.sprite.Group()
@@ -124,9 +119,8 @@ class Game:
         self.enemies_group = pygame.sprite.Group()
 
         self.player = None
-        self.font = pygame.font.SysFont("arial", 20)
 
-        # spawn
+        # spawn/difficulty
         self.spawn_interval = 1.0
         self.spawn_timer = 0.0
         self.difficulty_timer = 0.0
@@ -134,15 +128,16 @@ class Game:
         self.difficulty_reduction_factor = 0.92
         self.spawn_interval_min = 0.25
 
-        # música do menu
-        self.menu_playing = False
+        # boss control
+        self.boss_phase_started = False
+        self.boss_spawned = False
+        self.boss_ref = None
+
+        # inicia música do menu (se tiver)
         self.menu_start()
 
-    # ------------------------------------------------------------
-    # MÚSICA DO MENU E DO JOGO
-    # ------------------------------------------------------------
+    # ----------------- music control -----------------
     def menu_start(self):
-        """Toca a música do menu em loop (se disponível)."""
         if self.menu_music:
             try:
                 pygame.mixer.music.load(self.menu_music)
@@ -150,9 +145,9 @@ class Game:
                 self.menu_playing = True
             except Exception as e:
                 print(f"Aviso: falha ao tocar música do menu: {e}")
+                self.menu_playing = False
 
     def menu_stop(self):
-        """Para a música do menu."""
         try:
             if self.menu_playing:
                 pygame.mixer.music.stop()
@@ -160,26 +155,25 @@ class Game:
         except Exception:
             pass
 
+    # ----------------- game start -----------------
     def start_game(self):
-        """Inicializa tudo e inicia o gameplay."""
+        # stops menu music and starts gameplay music
         self.menu_stop()
-
-        # toca música de gameplay
         if self.game_music:
             try:
                 pygame.mixer.music.load(self.game_music)
-                pygame.mixer.music.play(-1)  # loop infinito
+                pygame.mixer.music.play(-1)
                 pygame.mixer.music.set_volume(0.65)
             except Exception as e:
-                print(f"Aviso: falha ao tocar música do gameplay: {e}")
+                print(f"Aviso: falha ao tocar música de gameplay: {e}")
 
-        # reseta estado
+        # reset state
         self.score = 0
         self.lives = 3
         self.total_time = 0.0
         self.paused = False
 
-        # grupos
+        # recreate groups
         self.all_sprites = pygame.sprite.Group()
         self.player_group = pygame.sprite.Group()
         self.bullets_group = pygame.sprite.Group()
@@ -191,51 +185,59 @@ class Game:
         self.all_sprites.add(self.player)
         self.player_group.add(self.player)
 
+        # reset boss flags
+        self.boss_phase_started = False
+        self.boss_spawned = False
+        self.boss_ref = None
+
+        # change state
         self.state = "playing"
 
-    # ------------------------------------------------------------
-    # LOOP PRINCIPAL
-    # ------------------------------------------------------------
+    # ----------------- main loop -----------------
     def run(self):
         while self.running:
             dt = self.clock.tick(FPS) / 1000.0
+
+            # update background always for parallax effect
             if self.background:
                 try:
                     self.background.update(dt)
                 except Exception:
                     self.background = None
 
+            # events
             self.handle_events()
 
+            # game update
             if self.state == "playing" and not self.paused:
                 self.total_time += dt
                 self.update(dt)
 
+            # draw current frame
             self.draw()
 
         self.quit()
 
-    # ------------------------------------------------------------
-    # EVENTOS
-    # ------------------------------------------------------------
+    # ----------------- events -----------------
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
 
+            # route events by state
             if self.state == "menu":
                 self._handle_menu_event(event)
             elif self.state == "playing":
                 self._handle_playing_event(event)
 
     def _handle_menu_event(self, event):
+        # ENTER starts, click START starts
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
                 self.start_game()
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
-
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.start_button_rect.collidepoint(event.pos):
                 self.start_game()
 
@@ -245,19 +247,21 @@ class Game:
                 self.paused = not self.paused
                 return
             if not self.paused and event.key == pygame.K_SPACE:
-                self._attempt_player_shoot(pygame.mouse.get_pos())
-
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.paused:
-            self._attempt_player_shoot(event.pos)
+                # shoot toward current mouse position
+                target = pygame.mouse.get_pos() if pygame.mouse.get_focused() else None
+                self._attempt_player_shoot(target_pos=target)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if not self.paused:
+                self._attempt_player_shoot(target_pos=event.pos)
 
     def _attempt_player_shoot(self, target_pos=None):
         try:
             bullet = self.player.shoot(target_pos=target_pos)
         except Exception as e:
-            print(f"Aviso: erro em shoot(): {e}")
+            print(f"Aviso: erro ao atirar: {e}")
             bullet = None
 
-        if bullet:
+        if bullet is not None:
             self.all_sprites.add(bullet)
             self.bullets_group.add(bullet)
             if self.shot_sound:
@@ -266,69 +270,112 @@ class Game:
                 except Exception:
                     pass
 
-    # ------------------------------------------------------------
-    # ATUALIZAÇÃO DO JOGO
-    # ------------------------------------------------------------
+    # ----------------- update -----------------
     def update(self, dt):
-        self.all_sprites.update(dt)
+        # update sprites
+        try:
+            self.all_sprites.update(dt)
+        except Exception:
+            # defensivo: evita crash se algum sprite falhar
+            pass
 
-        # recolhe balas dos shooters
+        # collect pending bullets from shooter enemies
         for enemy in list(self.enemies_group):
             if isinstance(enemy, ShooterEnemy):
-                b = enemy.pop_pending_bullet()
-                if b:
+                try:
+                    b = enemy.pop_pending_bullet()
+                except Exception:
+                    b = None
+                if b is not None:
                     self.all_sprites.add(b)
                     self.enemy_bullets_group.add(b)
 
-        # spawn
-        self.spawn_timer += dt
-        if self.spawn_timer >= self.spawn_interval:
-            self.spawn_timer -= self.spawn_interval
-            self.spawn_enemy()
+        # boss phase trigger at 60s
+        if not self.boss_phase_started and self.total_time >= 60.0:
+            self.boss_phase_started = True
+            print("Boss phase iniciado: spawn pausado. Limpe a tela!")
 
-        # dificuldade dinâmica
-        self.difficulty_timer += dt
-        if self.difficulty_timer >= self.difficulty_period:
-            self.difficulty_timer -= self.difficulty_period
-            self.spawn_interval = max(self.spawn_interval * self.difficulty_reduction_factor,
-                                      self.spawn_interval_min)
+        # spawning (disabled during boss phase)
+        if not self.boss_phase_started:
+            self.spawn_timer += dt
+            if self.spawn_timer >= self.spawn_interval:
+                self.spawn_timer -= self.spawn_interval
+                self.spawn_enemy()
 
-        # colisões tiros jogador vs inimigos
+            # difficulty scaling
+            self.difficulty_timer += dt
+            if self.difficulty_timer >= self.difficulty_period:
+                self.difficulty_timer -= self.difficulty_period
+                self.spawn_interval = max(self.spawn_interval * self.difficulty_reduction_factor,
+                                          self.spawn_interval_min)
+        else:
+            # when boss phase and no non-boss enemies remain -> spawn boss
+            non_boss_enemies = [e for e in self.enemies_group if not isinstance(e, BossEnemy)]
+            if not non_boss_enemies and not self.boss_spawned:
+                bx = SCREEN_WIDTH // 2
+                boss = BossEnemy(pos=(bx, -220), dy=60, start_y=100, hp=50, speed_x=140, player_ref=self.player)
+                self.enemies_group.add(boss)
+                self.all_sprites.add(boss)
+                self.boss_spawned = True
+                self.boss_ref = boss
+                print("Boss spawnado!")
+
+        # collisions: player bullets -> enemies
         collisions = pygame.sprite.groupcollide(self.bullets_group, self.enemies_group, True, False)
-        for bullet, enemies_hit in collisions.items():
-            for enemy in enemies_hit:
-                if enemy.take_damage(1):
-                    self.score += 10
+        if collisions:
+            for bullet, enemies_hit in collisions.items():
+                for enemy in enemies_hit:
+                    try:
+                        died = enemy.take_damage(1)
+                    except Exception:
+                        died = False
+                    if died:
+                        if isinstance(enemy, BossEnemy):
+                            # boss died: clear reference (further behavior can be added)
+                            if enemy is self.boss_ref:
+                                self.boss_ref = None
+                            print("Boss derrotado!")
+                        else:
+                            self.score += 10
 
-        # colisões balas inimigas vs player
-        if pygame.sprite.groupcollide(self.enemy_bullets_group, self.player_group, True, False):
+        # collisions: enemy bullets -> player
+        hits = pygame.sprite.groupcollide(self.enemy_bullets_group, self.player_group, True, False)
+        if hits:
             self.lives -= 1
             print(f"Player atingido! Vidas: {self.lives}")
             if self.lives <= 0:
                 self.display_game_over()
-                pygame.time.delay(2000)
+                pygame.time.delay(1500)
                 self.running = False
                 return
 
-        # colisões inimigo vs player
-        if pygame.sprite.spritecollide(self.player, self.enemies_group, dokill=False):
-            self.lives -= 1
-            print(f"Player colidiu com inimigo! Vidas: {self.lives}")
-            if self.lives <= 0:
-                self.display_game_over()
-                pygame.time.delay(2000)
-                self.running = False
-                return
+        # collisions: enemy -> player (touch)
+        enemy_hits = pygame.sprite.spritecollide(self.player, self.enemies_group, dokill=False)
+        if enemy_hits:
+            for enemy in enemy_hits:
+                try:
+                    enemy.kill()
+                except Exception:
+                    pass
+                self.lives -= 1
+                print(f"Player colidiu! Vidas: {self.lives}")
+                if self.lives <= 0:
+                    self.display_game_over()
+                    pygame.time.delay(1500)
+                    self.running = False
+                    return
 
-        # remove inimigos fora da tela
+        # remove enemies off-screen (no penalty)
         for enemy in list(self.enemies_group):
-            if enemy.rect.top > SCREEN_HEIGHT:
+            if enemy.rect.top > SCREEN_HEIGHT + 120:
                 enemy.kill()
 
-    # ------------------------------------------------------------
-    # SPAWN DE INIMIGOS
-    # ------------------------------------------------------------
+    # ----------------- spawn -----------------
     def spawn_enemy(self):
+        # don't spawn if boss phase started
+        if self.boss_phase_started:
+            return
+
         base = {"basic": 0.6, "zigzag": 0.18, "fast": 0.12, "shooter": 0.10}
         t = self.total_time
         bonus = min(0.6, t / 120.0)
@@ -357,17 +404,18 @@ class Game:
             e = ZigZagEnemy(pos=(x, y), dy=120, amplitude=80, frequency=0.9, player_ref=self.player)
         elif chosen == "fast":
             e = FastEnemy(pos=(x, y), dy=240, player_ref=self.player)
-        else:
+        elif chosen == "shooter":
             e = ShooterEnemy(pos=(x, y), dy=90, stop_distance=200, shoot_cooldown=1.6,
                              bullet_speed=200, player_ref=self.player, hp=3)
+        else:
+            e = BasicEnemy(pos=(x, y), player_ref=self.player)
 
         self.enemies_group.add(e)
         self.all_sprites.add(e)
 
-    # ------------------------------------------------------------
-    # DESENHO
-    # ------------------------------------------------------------
+    # ----------------- draw -----------------
     def draw(self):
+        # background
         if self.background:
             try:
                 self.background.draw(self.screen)
@@ -377,47 +425,108 @@ class Game:
         else:
             self.screen.fill((30, 40, 80))
 
+        # draw menu OR gameplay
         if self.state == "menu":
-            self._draw_menu()
-        elif self.state == "playing":
-            self.all_sprites.draw(self.screen)
-            self._draw_hud()
+            # draw menu only (no HUD/sprites)
+            try:
+                self._draw_menu()
+            except Exception as e:
+                print(f"Aviso: erro em _draw_menu(): {e}")
+        else:
+            # playing: draw sprites then HUD and overlays
+            try:
+                self.all_sprites.draw(self.screen)
+            except Exception:
+                pass
+
+            # boss hp bar top-left
+            if self.boss_ref is not None and self.boss_ref.alive():
+                try:
+                    self._draw_boss_hp(self.boss_ref)
+                except Exception:
+                    pass
+
+            # HUD
+            try:
+                self._draw_hud()
+            except Exception:
+                pass
+
+            # pause overlay
             if self.paused:
-                self.draw_pause_overlay()
+                try:
+                    self.draw_pause_overlay()
+                except Exception:
+                    pass
 
         pygame.display.flip()
 
     def _draw_menu(self):
-        # título
+        # subtle panel to highlight menu UI
+        panel = pygame.Surface((SCREEN_WIDTH - 40, SCREEN_HEIGHT - 80), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 80))
+        panel_rect = panel.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+        self.screen.blit(panel, panel_rect)
+
+        # title text
         title_surf = self.font_title.render("Pirata — O Tesouro", True, (240, 240, 220))
-        self.screen.blit(title_surf, title_surf.get_rect(center=(SCREEN_WIDTH // 2, 72)))
+        title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, 72))
+        self.screen.blit(title_surf, title_rect)
 
-        # imagem
-        if self.title_image:
-            rect = self.title_image.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 60))
-            self.screen.blit(self.title_image, rect)
+        # title image (if available)
+        if self.title_image is not None:
+            ti_rect = self.title_image.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 70))
+            self.screen.blit(self.title_image, ti_rect)
         else:
-            ph = pygame.Surface((220, 120))
+            # visible placeholder
+            ph_w, ph_h = 300, 140
+            ph = pygame.Surface((ph_w, ph_h))
             ph.fill((180, 160, 100))
-            self.screen.blit(ph, ph.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 60)))
+            pygame.draw.rect(ph, (140, 120, 80), ph.get_rect(), 4)
+            ph_rect = ph.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 70))
+            self.screen.blit(ph, ph_rect)
 
-        # botão START
+        # start button with shadow, hover, border
         mx, my = pygame.mouse.get_pos()
-        hover = self.start_button_rect.collidepoint(mx, my)
-        color = BUTTON_HOVER_COLOR if hover else BUTTON_COLOR
-        pygame.draw.rect(self.screen, color, self.start_button_rect, border_radius=8)
-        btn_text = self.font_button.render("START", True, BUTTON_TEXT_COLOR)
-        self.screen.blit(btn_text, btn_text.get_rect(center=self.start_button_rect.center))
+        rect = self.start_button_rect
+        # shadow
+        shadow = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        shadow.fill((0, 0, 0, 120))
+        self.screen.blit(shadow, (rect.x + 4, rect.y + 6))
+        # background color
+        hover = rect.collidepoint(mx, my)
+        color = (40, 200, 130) if hover else (28, 160, 100)
+        pygame.draw.rect(self.screen, color, rect, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 255, 255), rect, 2, border_radius=10)
+        btn_text = self.font_button.render("START", True, (255, 255, 255))
+        self.screen.blit(btn_text, btn_text.get_rect(center=rect.center))
 
-        # instruções
-        y0 = self.start_button_rect.bottom + 16
+        # instructions
+        y0 = rect.bottom + 14
         for i, line in enumerate(self.instructions):
-            surf = self.font_instruct.render(line, True, INSTRUCTIONS_COLOR)
-            rect = surf.get_rect(center=(SCREEN_WIDTH // 2, y0 + i * 22))
-            self.screen.blit(surf, rect)
+            surf = self.font_instruct.render(line, True, (230, 230, 230))
+            rect_text = surf.get_rect(center=(SCREEN_WIDTH // 2, y0 + i * 22))
+            self.screen.blit(surf, rect_text)
 
-        hint = self.font_instruct.render("Pressione ENTER para iniciar", True, (200, 200, 200))
+        # hint
+        hint = self.font_instruct.render("Pressione ENTER ou clique START para iniciar", True, (200, 200, 200))
         self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 40)))
+
+    def _draw_boss_hp(self, boss):
+        # background rect
+        pygame.draw.rect(self.screen, (30, 30, 30), BOSS_HP_BAR_RECT, border_radius=4)
+        pygame.draw.rect(self.screen, (200, 200, 200), BOSS_HP_BAR_RECT, 2, border_radius=4)
+        inner = BOSS_HP_BAR_RECT.inflate(-6, -6)
+        hp_ratio = max(0.0, min(1.0, float(boss.hp) / float(boss.max_hp) if boss.max_hp else 0.0))
+        fill_w = int(inner.width * hp_ratio)
+        if hp_ratio > 0.5:
+            color = (int(50 + (1 - hp_ratio) * 100), 200, 40)
+        else:
+            color = (220, int(50 + hp_ratio * 150), 40)
+        pygame.draw.rect(self.screen, (40, 40, 40), inner, border_radius=3)
+        pygame.draw.rect(self.screen, color, (inner.x, inner.y, fill_w, inner.height), border_radius=3)
+        name_surf = self.font_boss.render(BOSS_NAME, True, (240, 240, 240))
+        self.screen.blit(name_surf, (BOSS_HP_BAR_RECT.x, BOSS_HP_BAR_RECT.y - 20))
 
     def _draw_hud(self):
         score_surf = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
@@ -432,15 +541,17 @@ class Game:
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 160))
         self.screen.blit(overlay, (0, 0))
-        go_font = pygame.font.SysFont("arial", 56, bold=True)
+        go_font = pygame.font.SysFont(FONT_NAME, 56, bold=True)
         text = go_font.render("PAUSADO", True, (240, 240, 240))
         sub = self.font.render("Pressione ESC para continuar", True, (200, 200, 200))
-        self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20)))
-        self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30)))
+        rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
+        subrect = sub.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30))
+        self.screen.blit(text, rect)
+        self.screen.blit(sub, subrect)
 
     def display_game_over(self):
         self.screen.fill((10, 10, 10))
-        go_font = pygame.font.SysFont("arial", 48)
+        go_font = pygame.font.SysFont(FONT_NAME, 48)
         text = go_font.render("GAME OVER", True, (200, 50, 50))
         sub = self.font.render(f"Score final: {self.score}", True, (255, 255, 255))
         self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20)))
