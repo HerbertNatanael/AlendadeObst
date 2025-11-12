@@ -1,8 +1,8 @@
 # src/game.py
 # Jogo principal atualizado:
-# - corrige overlap de músicas (gameplay / boss / victory)
-# - cria self.boss_sound e garante que seja parado na vitória
-# - texto final menor e centralizado
+# - Texto de vitória menor e centralizado
+# - HUD: "Tempo para o Boss: Xs" abaixo do tempo
+# - Hitbox do player reduzida em 50% (aplicado nas verificações de colisão)
 #
 import os
 import random
@@ -36,6 +36,9 @@ BOSS_HP_BAR_RECT = pygame.Rect(12, 12, 360, 18)
 BOSS_NAME = "Boss final"
 FONT_NAME = "arial"
 
+# hitbox shrink factor (percentage to shrink width/height): 50% => 0.5
+PLAYER_HITBOX_SHRINK_FACTOR = 0.5
+
 
 # ----------------- Pickup (Obst) -----------------
 class Pickup(pygame.sprite.Sprite):
@@ -65,6 +68,30 @@ class Pickup(pygame.sprite.Sprite):
             self.image = surf
 
         self.rect = self.image.get_rect(center=pos)
+
+
+# ----------------- util: colisão com hitbox reduzida -----------------
+def collide_with_shrunken_player(a, b):
+    """
+    Função usada como 'collided' em groupcollide / spritecollide:
+    - a: sprite A (ex: bullet or enemy)
+    - b: sprite B (expected to be player)
+    Compara a.rect com uma versão inflada negativamente (menor) de b.rect.
+    A redução é definida por PLAYER_HITBOX_SHRINK_FACTOR.
+    """
+    if not (hasattr(a, "rect") and hasattr(b, "rect")):
+        return False
+    try:
+        shrink_w = int(b.rect.width * PLAYER_HITBOX_SHRINK_FACTOR)
+        shrink_h = int(b.rect.height * PLAYER_HITBOX_SHRINK_FACTOR)
+        # inflate takes (dx, dy) added to width/height; to shrink, pass negative values
+        infl_w = -(b.rect.width - shrink_w)
+        infl_h = -(b.rect.height - shrink_h)
+        shrunk = b.rect.inflate(infl_w, infl_h)
+        return a.rect.colliderect(shrunk)
+    except Exception:
+        # fallback: rect collide
+        return a.rect.colliderect(b.rect)
 
 
 # ----------------- Game class -----------------
@@ -383,7 +410,7 @@ class Game:
                         print(f"Aviso: falha ao tocar boss_appear_music: {e}")
                         self.boss_sound = None
 
-        # collisions: player bullets -> enemies
+        # collisions: player bullets -> enemies (unchanged)
         collisions = pygame.sprite.groupcollide(self.bullets_group, self.enemies_group, True, False)
         if collisions:
             for bullet, enemies_hit in collisions.items():
@@ -406,8 +433,7 @@ class Game:
                             if self.boss_ref is enemy:
                                 self.boss_ref = None
                             print("Boss derrotado! Obst dropada.")
-                            # pare imediatamente o som do boss, se estiver tocando (o drop pode ficar com som ainda tocando;
-                            # paramos aqui também para garantir)
+                            # pare imediatamente o som do boss, se estiver tocando
                             if self.boss_sound:
                                 try:
                                     self.boss_sound.stop()
@@ -418,7 +444,7 @@ class Game:
                             self.score += 10
 
         # check player colliding with pickups (Obst)
-        if pygame.sprite.spritecollideany(self.player, self.pickups_group):
+        if pygame.sprite.spritecollideany(self.player, self.pickups_group, collided=collide_with_shrunken_player):
             # coletou a Obst: remove pickup(s) and trigger victory
             for p in list(self.pickups_group):
                 try:
@@ -438,8 +464,9 @@ class Game:
             except Exception as e:
                 print(f"Aviso: erro ao disparar trigger_victory(): {e}")
 
-        # collisions: enemy bullets -> player
-        hits = pygame.sprite.groupcollide(self.enemy_bullets_group, self.player_group, True, False)
+        # collisions: enemy bullets -> player (use shrunken hitbox)
+        hits = pygame.sprite.groupcollide(self.enemy_bullets_group, self.player_group, True, False,
+                                          collided=collide_with_shrunken_player)
         if hits:
             self.lives -= 1
             print(f"Player atingido! Vidas: {self.lives}")
@@ -449,8 +476,9 @@ class Game:
                 self.running = False
                 return
 
-        # collisions: enemy -> player (touch)
-        enemy_hits = pygame.sprite.spritecollide(self.player, self.enemies_group, dokill=False)
+        # collisions: enemy -> player (touch) using shrunken hitbox
+        enemy_hits = pygame.sprite.spritecollide(self.player, self.enemies_group, dokill=False,
+                                                 collided=collide_with_shrunken_player)
         if enemy_hits:
             for enemy in enemy_hits:
                 try:
@@ -639,9 +667,16 @@ class Game:
         score_surf = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
         lives_surf = self.font.render(f"Vidas: {self.lives}", True, (255, 255, 255))
         time_surf = self.font.render(f"Tempo: {int(self.total_time)}s", True, (255, 255, 255))
+        # Tempo para o Boss (regressivo)
+        boss_remaining = max(0, 60 - int(self.total_time))
+        boss_time_surf = self.font.render(f"Tempo para o Boss: {boss_remaining}s", True, (200, 200, 255))
+
         self.screen.blit(score_surf, (10, 10))
         self.screen.blit(lives_surf, (10, 34))
-        self.screen.blit(time_surf, (SCREEN_WIDTH - 120, 10))
+        self.screen.blit(time_surf, (SCREEN_WIDTH - 200, 10))
+        # draw boss time under the time (small offset)
+        self.screen.blit(boss_time_surf, (SCREEN_WIDTH - 200, 34))
+
         pygame.display.set_caption(f"Pirata — FPS: {int(self.clock.get_fps())}")
 
     # ----------------- victory sequence -----------------
@@ -703,8 +738,8 @@ class Game:
         text_center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
 
         msg = "Parabéns, você conquistou a Obst, a fruta sagrada dos sete mares!"
-        # smaller font and centered
-        victory_font = pygame.font.SysFont(FONT_NAME, 22, bold=True)
+        # agora menor (fonte 18) e centralizado
+        victory_font = pygame.font.SysFont(FONT_NAME, 18, bold=True)
 
         while True:
             now = time.perf_counter()
@@ -734,7 +769,7 @@ class Game:
             rect = victory_surf.get_rect(center=image_center)
             self.screen.blit(victory_surf, rect)
 
-            # draw message centered (now smaller and middle of screen)
+            # draw message centered (menor e no meio da tela)
             text_surf = victory_font.render(msg, True, (255, 230, 120))
             text_rect = text_surf.get_rect(center=text_center)
             self.screen.blit(text_surf, text_rect)
