@@ -11,6 +11,7 @@ import pygame
 from src.player import Player
 from src.bullet import Bullet
 from src.enemy import BasicEnemy, ZigZagEnemy, FastEnemy, ShooterEnemy
+from src.background import ParallaxBackground
 
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 800
