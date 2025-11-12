@@ -1,6 +1,5 @@
 # src/enemy.py
-# Inimigos e projéteis: BasicEnemy, ZigZagEnemy, FastEnemy, ShooterEnemy, BossEnemy
-# Inclui EnemyBullet e BossBullet. load_image_safe registra avisos quando assets faltam.
+# Enemies module (com loading robusto de imagens e avisos detalhados)
 #
 import os
 import math
@@ -8,50 +7,126 @@ import random
 import pygame
 
 # ---------------- paths ----------------
-ASSETS_IMAGES = os.path.join(os.path.dirname(__file__), "..", "assets", "images")
-BOSS_IMG = os.path.join(ASSETS_IMAGES, "boss.png")
-BOSS_BULLET_IMG = os.path.join(ASSETS_IMAGES, "boss_bullet.png")
-ENEMY_IMG = os.path.join(ASSETS_IMAGES, "enemy.png")
-ENEMY_BULLET_IMG = os.path.join(ASSETS_IMAGES, "enemy_bullet.png")
-SHOOTER_IMG = os.path.join(ASSETS_IMAGES, "shooter.png")
-ZIGZAG_IMG = os.path.join(ASSETS_IMAGES, "zigzag.png")
-FAST_IMG = os.path.join(ASSETS_IMAGES, "fast.png")
+BASE_DIR = os.path.dirname(__file__)
+ASSETS_IMAGES = os.path.normpath(os.path.join(BASE_DIR, "..", "assets", "images"))
+
+# padrão de nomes que o jogo usa; você pode renomear suas imagens para um desses nomes
+EXPECTED_IMAGES = {
+    "boss": "boss.png",
+    "boss_bullet": "boss_bullet.png",
+    "enemy": "enemy.png",
+    "enemy_bullet": "enemy_bullet.png",
+    "shooter": "shooter.png",
+    "zigzag": "zigzag.png",
+    "fast": "fast.png",
+}
+
+# paths construídos (usados pelas funções, mas loader tentará alternativas)
+BOSS_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["boss"])
+BOSS_BULLET_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["boss_bullet"])
+ENEMY_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["enemy"])
+ENEMY_BULLET_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["enemy_bullet"])
+SHOOTER_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["shooter"])
+ZIGZAG_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["zigzag"])
+FAST_IMG = os.path.join(ASSETS_IMAGES, EXPECTED_IMAGES["fast"])
 
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 800
 
 _missing_warned = set()
 
+
+def _try_variants(filename):
+    """
+    Gera uma lista de candidate paths para filename.
+    - Se filename já for caminho absoluto/relativo existente, tenta direto.
+    - Caso contrário, tenta basename com diferentes extensões dentro ASSETS_IMAGES.
+    """
+    candidates = []
+
+    # se veio um path absoluto/relativo que contenha separadores, tenta direto primeiro
+    if os.path.sep in filename or "/" in filename:
+        candidates.append(os.path.normpath(filename))
+
+    # tenta direto como dado (pode ser relativo)
+    candidates.append(os.path.normpath(os.path.join(BASE_DIR, filename)))
+    # tenta na pasta assets/images com o nome dado
+    candidates.append(os.path.join(ASSETS_IMAGES, filename))
+
+    # se o filename possui extensão, tente variantes de maiúscula/minúscula
+    name, ext = os.path.splitext(filename)
+    exts = [ext] if ext else [".png", ".PNG", ".jpg", ".jpeg"]
+    # se não tinha ext, tente várias
+    if not ext:
+        exts = [".png", ".PNG", ".jpg", ".jpeg"]
+
+    # se filename foi apenas nome sem ext, tente várias combinações dentro ASSETS_IMAGES
+    base_only = os.path.basename(name)
+    for e in exts:
+        candidates.append(os.path.join(ASSETS_IMAGES, base_only + e))
+        candidates.append(os.path.join(BASE_DIR, base_only + e))
+
+    # dedupe e retorne
+    seen = set()
+    out = []
+    for c in candidates:
+        cn = os.path.normpath(c)
+        if cn not in seen:
+            out.append(cn)
+            seen.add(cn)
+    return out
+
+
 def load_image_safe(path, size=None, fallback_color=(180, 60, 60)):
     """
-    Tenta carregar a imagem em `path`. Se não existir, retorna um fallback visível.
-    Registra um aviso no console apenas uma vez por path ausente.
-    Se `size` for provido, escala a imagem mantendo alpha.
+    Carrega a imagem tentando várias alternativas.
+    - path pode ser um caminho completo ou somente o nome do arquivo esperado.
+    - se não encontrar nada, retorna um fallback contendo o nome do arquivo como texto (útil para debug).
     """
-    try:
-        if os.path.isfile(path):
-            img = pygame.image.load(path).convert_alpha()
-            if size is not None:
-                try:
-                    img = pygame.transform.smoothscale(img, size)
-                except Exception:
-                    img = pygame.transform.scale(img, size)
-            return img
-        else:
-            # log uma única vez para evitar spam
-            if path not in _missing_warned:
-                print(f"Aviso: asset não encontrado: {path}")
-                _missing_warned.add(path)
-    except Exception as e:
-        if path not in _missing_warned:
-            print(f"Aviso: falha ao carregar {path}: {e}")
-            _missing_warned.add(path)
+    tried = []
+    for candidate in _try_variants(path):
+        tried.append(candidate)
+        if os.path.isfile(candidate):
+            try:
+                img = pygame.image.load(candidate).convert_alpha()
+                if size is not None:
+                    try:
+                        img = pygame.transform.smoothscale(img, size)
+                    except Exception:
+                        img = pygame.transform.scale(img, size)
+                return img
+            except Exception as e:
+                # caso falhe no carregamento (arquivo corrompido etc.)
+                if candidate not in _missing_warned:
+                    print(f"Aviso: falha ao carregar imagem '{candidate}': {e}")
+                    _missing_warned.add(candidate)
+                # continue tentando outros candidatos
 
-    # fallback visual: retângulo com borda (mais legível que um quadrado simples)
+    # se não achou nada, log detalhado (apenas uma vez por conjunto de tentativas)
+    key = "|".join(tried)
+    if key not in _missing_warned:
+        print("Aviso: não foi possível localizar a imagem. Tente colocar um arquivo com um destes nomes/paths:")
+        for t in tried:
+            print("  ->", t)
+        _missing_warned.add(key)
+
+    # fallback visual: surface com texto do nome base (útil para identificar qual asset falta)
     w, h = size if size else (48, 48)
     surf = pygame.Surface((w, h), pygame.SRCALPHA)
     surf.fill((fallback_color[0], fallback_color[1], fallback_color[2], 220))
     pygame.draw.rect(surf, (30, 30, 30), surf.get_rect(), 3, border_radius=6)
+
+    # desenha uma sigla/label do arquivo esperado (basename) para debug
+    try:
+        basename = os.path.basename(path)
+        font = pygame.font.SysFont("arial", max(10, min(20, w // 6)))
+        txt = basename.replace(".png", "").replace(".PNG", "")
+        label = font.render(txt, True, (20, 20, 20))
+        rect = label.get_rect(center=(w // 2, h // 2))
+        surf.blit(label, rect)
+    except Exception:
+        pass
+
     return surf
 
 
@@ -67,10 +142,8 @@ class EnemyBullet(pygame.sprite.Sprite):
         self.speed = speed
 
     def update(self, dt):
-        # vx/vy interpreted as per-second velocity
         self.rect.x += int(self.vx * dt)
         self.rect.y += int(self.vy * dt)
-        # remove if outside reasonable bounds
         if (self.rect.top > SCREEN_HEIGHT + 50 or
                 self.rect.bottom < -50 or
                 self.rect.right < -60 or
@@ -124,7 +197,6 @@ class Enemy(pygame.sprite.Sprite):
         return False
 
     def update(self, dt):
-        # override in subclasses
         self.pos.x += self.vx * dt
         self.pos.y += self.vy * dt
         self.rect.center = (int(self.pos.x), int(self.pos.y))
@@ -132,7 +204,6 @@ class Enemy(pygame.sprite.Sprite):
 
 # ---------------- BasicEnemy ----------------
 class BasicEnemy(Enemy):
-    """Inimigo básico: move em direção ao jogador (com componente descendente)."""
     def __init__(self, pos=(240, -40), hp=1, speed=80, player_ref=None):
         img = load_image_safe(ENEMY_IMG, (48, 48), (200, 80, 80))
         super().__init__(pos=pos, hp=hp, image=img, size=(48, 48), player_ref=player_ref)
@@ -140,11 +211,9 @@ class BasicEnemy(Enemy):
         self.vy = speed
 
     def update(self, dt):
-        # se temos referência do player, tente mover levemente em sua direção X
         if self.player_ref is not None and hasattr(self.player_ref, "rect"):
             px = self.player_ref.rect.centerx
             dx = px - self.pos.x
-            # normalize horizontal component and scale small so enemy generally goes down
             if abs(dx) > 6:
                 steer = 0.5 * math.copysign(1, dx)
                 self.vx = steer * 60
@@ -152,15 +221,12 @@ class BasicEnemy(Enemy):
                 self.vx = 0
         else:
             self.vx = 0
-
-        # sempre descer
         self.vy = self.speed
         super().update(dt)
 
 
 # ---------------- ZigZagEnemy ----------------
 class ZigZagEnemy(Enemy):
-    """Inimigo que faz zigzag horizontal enquanto desce."""
     def __init__(self, pos=(240, -40), hp=1, dy=120, amplitude=60, frequency=1.0, player_ref=None):
         img = load_image_safe(ZIGZAG_IMG, (48, 48), (180, 110, 80))
         super().__init__(pos=pos, hp=hp, image=img, size=(48, 48), player_ref=player_ref)
@@ -173,7 +239,6 @@ class ZigZagEnemy(Enemy):
     def update(self, dt):
         self.t += dt
         self.vy = self.dy
-        # sinusoidal x motion
         self.pos.x += math.sin(self.t * self.frequency * 2.0 * math.pi) * self.amplitude * dt
         self.pos.y += self.vy * dt
         self.rect.center = (int(self.pos.x), int(self.pos.y))
@@ -181,7 +246,6 @@ class ZigZagEnemy(Enemy):
 
 # ---------------- FastEnemy ----------------
 class FastEnemy(Enemy):
-    """Inimigo rápido que vai direto pra baixo."""
     def __init__(self, pos=(240, -40), hp=1, dy=240, player_ref=None):
         img = load_image_safe(FAST_IMG, (40, 40), (240, 140, 60))
         super().__init__(pos=pos, hp=hp, image=img, size=(40, 40), player_ref=player_ref)
@@ -193,10 +257,6 @@ class FastEnemy(Enemy):
 
 # ---------------- ShooterEnemy ----------------
 class ShooterEnemy(Enemy):
-    """
-    Inimigo que desce até certa distância (stop_distance) e para, então atira para o jogador.
-    Produz projéteis e os armazena em .new_bullets (lista) que o game.py deverá pegar.
-    """
     def __init__(self, pos=(240, -40), hp=2, dy=90, stop_distance=200, shoot_cooldown=1.6,
                  bullet_speed=180, player_ref=None):
         img = load_image_safe(SHOOTER_IMG, (56, 56), (200, 50, 120))
@@ -207,23 +267,20 @@ class ShooterEnemy(Enemy):
         self.shoot_cooldown = shoot_cooldown
         self.shoot_timer = 0.0
         self.bullet_speed = bullet_speed
-        self.new_bullets = []  # bullets will be appended here for game.py to collect
+        self.new_bullets = []
 
     def update(self, dt):
         if not self.stopped:
-            # move down until reach stop_y
             if self.pos.y < self.stop_y:
                 self.pos.y += self.vy * dt
             else:
                 self.pos.y = self.stop_y
                 self.stopped = True
-                self.shoot_timer = 0.2  # pequeno delay antes de atirar
+                self.shoot_timer = 0.2
         else:
-            # atira periodicamente
             self.shoot_timer += dt
             if self.shoot_timer >= self.shoot_cooldown:
                 self.shoot_timer = 0.0
-                # cria 1 projétil em direção ao jogador (ou em leque)
                 if self.player_ref is not None and hasattr(self.player_ref, "rect"):
                     px, py = self.player_ref.rect.center
                     cx, cy = self.rect.center
@@ -235,28 +292,19 @@ class ShooterEnemy(Enemy):
                     b = EnemyBullet((cx, cy + 10), vx, vy, speed=self.bullet_speed)
                     self.new_bullets.append(b)
                 else:
-                    # fallback: shoot straight down
                     b = EnemyBullet(self.rect.center, 0, self.bullet_speed, speed=self.bullet_speed)
                     self.new_bullets.append(b)
 
         self.rect.center = (int(self.pos.x), int(self.pos.y))
 
     def pop_pending_bullet(self):
-        """Returna próximo projétil pendente (ou None). usado por game.py."""
         if self.new_bullets:
             return self.new_bullets.pop(0)
         return None
 
 
-# ---------------- BossEnemy (mais completo) ----------------
+# ---------------- BossEnemy ----------------
 class BossEnemy(Enemy):
-    """
-    Boss final:
-    - desce até start_y
-    - move horizontalmente (vaivém)
-    - dispara padrões variados (usa BossBullet)
-    - guarda balas em new_bullets para game.py coletar
-    """
     def __init__(self, pos=(SCREEN_WIDTH // 2, -220), dy=60, start_y=100, hp=50, speed_x=120, player_ref=None):
         size = (120, 80)
         img = load_image_safe(BOSS_IMG, size, (150, 50, 60))
@@ -275,7 +323,6 @@ class BossEnemy(Enemy):
         self.new_bullets = []
 
     def update(self, dt):
-        # descer inicialmente
         if not self.descended:
             if self.pos.y < self.start_y:
                 self.pos.y += self.dy * dt
@@ -284,7 +331,6 @@ class BossEnemy(Enemy):
                 self.descended = True
                 self.vx = self.speed_x
         else:
-            # mover horizontalmente e ricochetear nas bordas
             self.pos.x += self.vx * dt
             if self.pos.x < self.min_x:
                 self.pos.x = self.min_x
@@ -293,7 +339,6 @@ class BossEnemy(Enemy):
                 self.pos.x = self.max_x
                 self.vx = -abs(self.vx)
 
-            # timer de rajadas
             self.shoot_timer += dt
             if self.shoot_timer >= self.shoot_cooldown:
                 self.shoot_timer = 0.0
@@ -302,25 +347,20 @@ class BossEnemy(Enemy):
         self.rect.center = (int(self.pos.x), int(self.pos.y))
 
     def _fire_pattern(self):
-        """Alterna entre padrões de disparo; adiciona BossBullet(s) em self.new_bullets."""
         self.pattern_index = (self.pattern_index + 1) % 4
         cx, cy = self.rect.center
 
         if self.pattern_index == 0:
-            # leque frontal (com gap no centro para passagem)
-            gap = 40  # pixels; leave central gap by skipping some angles
+            gap = 40
             angles = [-45, -30, -15, 0, 15, 30, 45]
-            # make a central gap by removing some angles around 0
             filtered = [a for a in angles if not (-gap/2 < a < gap/2)]
             for a in filtered:
                 rad = math.radians(a)
                 vx = math.sin(rad) * 300
                 vy = math.cos(rad) * 300
-                b = BossBullet((cx, cy + 20), vx, vy, speed=300)
-                self.new_bullets.append(b)
+                self.new_bullets.append(BossBullet((cx, cy + 20), vx, vy, speed=300))
 
         elif self.pattern_index == 1:
-            # diagonais alternadas: curtinhas, vindo dos lados deixando ranhura no meio
             left_x = 60
             right_x = SCREEN_WIDTH - 60
             for i in range(5):
@@ -329,33 +369,27 @@ class BossEnemy(Enemy):
                 vx = math.sin(rad) * 260
                 vy = math.cos(rad) * 260
                 self.new_bullets.append(BossBullet((left_x, cy + 20), vx, vy, speed=260))
-                # mirrored angle from right
                 rad2 = math.radians(-angle)
                 vx2 = math.sin(rad2) * 260
                 vy2 = math.cos(rad2) * 260
                 self.new_bullets.append(BossBullet((right_x, cy + 20), vx2, vy2, speed=260))
 
         elif self.pattern_index == 2:
-            # linhas verticais com um gap aleatório para passagem
             gap_center = random.randint(120, SCREEN_WIDTH - 120)
             gap_width = random.randint(60, 120)
             step = 60
             for x in range(40, SCREEN_WIDTH, step):
-                # se x dentro do gap, pule (deixe canal)
                 if gap_center - gap_width // 2 <= x <= gap_center + gap_width // 2:
                     continue
-                b = BossBullet((x, cy + 20), 0, 300, speed=300)
-                self.new_bullets.append(b)
+                self.new_bullets.append(BossBullet((x, cy + 20), 0, 300, speed=300))
 
         else:
-            # padrão 4: meia-espiral (vários ângulos em sequência) deixando espaço
             base = random.randint(0, 60)
             for i in range(10):
                 a = base + i * 18
                 rad = math.radians(a)
                 vx = math.sin(rad) * 240
                 vy = math.cos(rad) * 240
-                # skip one bullet to make a corridor
                 if i == 4:
                     continue
                 self.new_bullets.append(BossBullet((cx, cy + 20), vx, vy, speed=240))
