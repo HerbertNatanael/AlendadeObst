@@ -1,14 +1,3 @@
-# src/background.py
-# Parallax background simples para o jogo.
-# - Camada "water" (faz o efeito principal vertical contínuo).
-# - Camadas "side" (left e right) que deslocam também (padrão vertical, mas você pode adaptar).
-# - Suporta imagens em assets/images/ (nomes padrão abaixo). Se faltarem, usa fallback procedural.
-#
-# Uso:
-#   bg = ParallaxBackground(screen_size=(480,800))
-#   no loop principal (sempre, independente do movimento do player):
-#       bg.update(dt)
-#       bg.draw(screen)
 #
 import os
 import math
