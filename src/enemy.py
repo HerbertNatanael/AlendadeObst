@@ -1,12 +1,13 @@
 # src/enemy.py
-# Inimigos com animação visual suave (yaw/pitch) semelhante ao player.
-# Além disso, ShooterEnemy tem HP maior e exibe uma barra de vida acima do sprite.
+# Inimigos com animação yaw/pitch e BossEnemy (movimento horizontal + HP alto)
 #
-# Arquivos opcionais (assets/images/):
-#   enemy_basic.png, enemy_zigzag.png, enemy_fast.png, enemy_shooter.png
+# Assets opcionais:
+#   assets/images/enemy_basic.png
+#   assets/images/enemy_zigzag.png
+#   assets/images/enemy_fast.png
+#   assets/images/enemy_shooter.png
+#   assets/images/boss.png          <- imagem opcional do boss
 #
-# Ajustes visuais/tuning no topo do arquivo.
-
 import os
 import math
 import time
@@ -18,22 +19,22 @@ ENEMY_BASIC_IMG = os.path.join(ASSETS_IMAGES, "enemy_basic.png")
 ENEMY_ZIGZAG_IMG = os.path.join(ASSETS_IMAGES, "enemy_zigzag.png")
 ENEMY_FAST_IMG = os.path.join(ASSETS_IMAGES, "enemy_fast.png")
 ENEMY_SHOOTER_IMG = os.path.join(ASSETS_IMAGES, "enemy_shooter.png")
+BOSS_IMG = os.path.join(ASSETS_IMAGES, "boss.png")
 
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 800
 
-# --- Parâmetros visuais / tuning ---
-SPRITE_DRAW_SIZE = (48, 48)   # tamanho base (w,h) ao desenhar
-MAX_HORIZ_SCALE = 0.72        # compressão horizontal máxima quando virado de lado
-MAX_YAW_ROT_DEG = 12.0        # rotação 2D máxima ao virar lateralmente
-PITCH_UP_ROT_DEG = -8.0       # rotação quando o inimigo "aponta" para cima
-TILT_SPEED = 8.0              # velocidade de interpolação entre estados visuais
-HEALTH_BAR_HEIGHT = 6         # altura da barra de vida (pixels)
-HEALTH_BAR_MARGIN = 4         # espaço entre barra e topo do sprite
-# ------------------------------------------------------
+# Visual tuning
+SPRITE_DRAW_SIZE = (48, 48)
+MAX_HORIZ_SCALE = 0.72
+MAX_YAW_ROT_DEG = 12.0
+PITCH_UP_ROT_DEG = -8.0
+TILT_SPEED = 8.0
+HEALTH_BAR_HEIGHT = 6
+HEALTH_BAR_MARGIN = 4
 
-def load_enemy_image(path, size=SPRITE_DRAW_SIZE, fallback_color=(180,180,220)):
-    """Carrega e escala a imagem se existir; senão retorna placeholder."""
+
+def load_enemy_image(path, size=SPRITE_DRAW_SIZE, fallback_color=(180, 180, 220)):
     if os.path.isfile(path):
         try:
             img = pygame.image.load(path).convert_alpha()
@@ -41,45 +42,39 @@ def load_enemy_image(path, size=SPRITE_DRAW_SIZE, fallback_color=(180,180,220)):
             return img
         except Exception as e:
             print(f"Aviso: falha ao carregar {path}: {e}")
-    # fallback simples
-    w,h = size
-    surf = pygame.Surface((w,h), pygame.SRCALPHA)
+    w, h = size
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
     pygame.draw.rect(surf, fallback_color, (0, int(h*0.15), w, int(h*0.7)), border_radius=int(min(size)/8))
-    pygame.draw.circle(surf, (110,110,160), (w//2, int(h*0.3)), int(min(size)/6))
+    pygame.draw.circle(surf, (110, 110, 160), (w//2, int(h*0.3)), int(min(size)/6))
     return surf
 
 
 class Enemy(pygame.sprite.Sprite):
-    """Classe base para inimigos com animação yaw/pitch."""
-    def __init__(self, pos=(240,-50), hp=1, image=None, player_ref=None):
+    def __init__(self, pos=(240, -50), hp=1, image=None, player_ref=None, size=SPRITE_DRAW_SIZE):
         super().__init__()
         self.hp = hp
         self.max_hp = hp
         self.pos = pygame.math.Vector2(pos)
         self.player_ref = player_ref
+        self.size = size
 
-        # imagem original (base para transformações)
         if image is not None:
             self.original_image = image
         else:
-            self.original_image = load_enemy_image(ENEMY_BASIC_IMG)
+            self.original_image = load_enemy_image(ENEMY_BASIC_IMG, size=self.size)
 
-        # imagem atual desenhada (inicialmente copia da original)
         self.image = self.original_image.copy()
         self.rect = self.image.get_rect(center=pos)
 
-        # estado visual para animação (yaw/pitch)
         self.yaw_value = 0.0
         self.target_yaw_value = 0.0
         self.pitch_value = 0.0
         self.target_pitch_value = 0.0
 
-        # velocidade atual (usada para derivar yaw visual)
         self.vx = 0.0
         self.vy = 0.0
 
     def take_damage(self, amount=1):
-        """Aplica dano; retorna True se morreu (hp <= 0)."""
         self.hp -= amount
         if self.hp <= 0:
             self.kill()
@@ -87,36 +82,24 @@ class Enemy(pygame.sprite.Sprite):
         return False
 
     def _update_visual_targets(self, dt):
-        """
-        Atualiza os target_yaw / target_pitch com base no movimento atual (vx,vy)
-        ou na direção para o player (para shooters).
-        """
-        # yaw alvo baseado no sinal de vx (movimento horizontal)
         if abs(self.vx) < 0.01:
             desired_yaw = 0.0
         else:
             normalizer = max(1.0, abs(self.vx))
             desired_yaw = max(-1.0, min(1.0, self.vx / normalizer))
-
         self.target_yaw_value = desired_yaw
 
-        # pitch: quando o inimigo estiver se movendo verticalmente para cima, aplica pitch
         if self.vy < -1.0:
             pv = min(1.0, -self.vy / max(100.0, abs(self.vy)))
             self.target_pitch_value = pv
         else:
             self.target_pitch_value = 0.0
 
-        # interpola suavemente
         interp = min(1.0, TILT_SPEED * dt)
         self.yaw_value += (self.target_yaw_value - self.yaw_value) * interp
         self.pitch_value += (self.target_pitch_value - self.pitch_value) * interp
 
     def _apply_visual_transform(self, include_health_bar=False):
-        """
-        Aplica compressão horizontal + rotação 2D baseada em yaw/pitch.
-        Se include_health_bar=True, desenha uma barra de vida acima do sprite.
-        """
         yaw = self.yaw_value
         abs_yaw = abs(yaw)
         horiz_scale = 1.0 - (1.0 - MAX_HORIZ_SCALE) * abs_yaw
@@ -124,11 +107,9 @@ class Enemy(pygame.sprite.Sprite):
         pitch_rot = self.pitch_value * PITCH_UP_ROT_DEG
         total_rot = yaw_rot + pitch_rot
 
-        w0,h0 = SPRITE_DRAW_SIZE
+        w0, h0 = self.size
         new_w = max(2, int(w0 * horiz_scale))
         scaled = pygame.transform.smoothscale(self.original_image, (new_w, h0))
-
-        # canvas do tamanho original para centralizar a scaled
         canvas = pygame.Surface((w0, h0), pygame.SRCALPHA)
         x_offset = (w0 - new_w) // 2
         canvas.blit(scaled, (x_offset, 0))
@@ -138,50 +119,36 @@ class Enemy(pygame.sprite.Sprite):
         except Exception:
             rotated = pygame.transform.rotate(canvas, total_rot)
 
-        # Se for necessário desenhar a barra de vida, criamos uma superfície maior e pintamos a barra
         if include_health_bar:
             bar_h = HEALTH_BAR_HEIGHT + HEALTH_BAR_MARGIN
             combined_w = rotated.get_width()
             combined_h = rotated.get_height() + bar_h
             combined = pygame.Surface((combined_w, combined_h), pygame.SRCALPHA)
-
-            # calcula posição onde o sprite rotacionado ficará dentro do combined (baixo)
             sprite_x = 0
             sprite_y = bar_h
             combined.blit(rotated, (sprite_x, sprite_y))
-
-            # Desenha a barra de vida na parte superior (centralizada)
-            bar_w = int(combined_w * 0.9)  # 90% da largura
+            bar_w = int(combined_w * 0.9)
             bar_x = (combined_w - bar_w) // 2
             bar_y = HEALTH_BAR_MARGIN // 2
-            # fundo da barra (cinza escuro)
             pygame.draw.rect(combined, (60, 60, 60), (bar_x, bar_y, bar_w, HEALTH_BAR_HEIGHT), border_radius=2)
-            # proporção de vida
             hp_ratio = max(0.0, min(1.0, float(self.hp) / float(self.max_hp) if self.max_hp else 0.0))
-            # cor da barra: verde -> amarelo -> vermelho
             if hp_ratio > 0.5:
-                # mais verde
                 g = int(255 * (hp_ratio - 0.5) * 2)
                 r = int(255 * (1 - (hp_ratio - 0.5) * 2) * 0.2)
                 color = (max(50, r), min(255, 200 + g//2), 40)
             else:
-                # vermelho -> interpolate
                 r = int(200 + (1.0 - hp_ratio) * 55)
                 g = int(200 * hp_ratio)
                 color = (min(255, r), max(30, g), 30)
             fill_w = max(1, int(bar_w * hp_ratio))
             pygame.draw.rect(combined, color, (bar_x, bar_y, fill_w, HEALTH_BAR_HEIGHT), border_radius=2)
-
-            # update image and rect
             old_center = self.rect.center
             self.image = combined
             self.rect = self.image.get_rect()
             self.rect.center = old_center
-            # sincroniza pos com rect para manter consistência externa
             self.pos.x = self.rect.x
             self.pos.y = self.rect.y
         else:
-            # sem barra de vida
             old_center = self.rect.center
             self.image = rotated
             self.rect = self.image.get_rect()
@@ -191,41 +158,32 @@ class Enemy(pygame.sprite.Sprite):
 
 
 class BasicEnemy(Enemy):
-    """Desce e ajusta X para mirar o jogador (seguimento horizontal simples)."""
-    def __init__(self, pos=(240,-50), dy=120, steer_speed=80, player_ref=None):
+    def __init__(self, pos=(240, -50), dy=120, steer_speed=80, player_ref=None):
         img = load_enemy_image(ENEMY_BASIC_IMG, size=SPRITE_DRAW_SIZE)
-        super().__init__(pos=pos, hp=1, image=img, player_ref=player_ref)
+        super().__init__(pos=pos, hp=1, image=img, player_ref=player_ref, size=SPRITE_DRAW_SIZE)
         self.dy = dy
         self.steer_speed = steer_speed
 
     def update(self, dt):
-        # segue horizontalmente o player (apenas se player_ref fornecido)
         if self.player_ref is not None:
             target_x = self.player_ref.rect.centerx
             dx = target_x - self.pos.x
             if abs(dx) > 2:
                 sign = 1 if dx > 0 else -1
                 self.pos.x += sign * min(abs(dx), self.steer_speed * dt)
-
-        # sempre desce
         self.vx = (self.pos.x - self.rect.x) / max(1e-6, dt)
         self.vy = self.dy
         self.pos.y += self.dy * dt
-
-        # sincroniza rect antes de atualizar visuais
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
-
-        # atualiza targets visuais e aplica transform (sem barra de vida)
         self._update_visual_targets(dt)
         self._apply_visual_transform(include_health_bar=False)
 
 
 class ZigZagEnemy(Enemy):
-    """Desce e faz Z (sinusoidal) enquanto também se aproxima do player horizontalmente."""
-    def __init__(self, pos=(240,-50), dy=110, amplitude=70, frequency=1.0, steer_speed=60, player_ref=None):
-        img = load_enemy_image(ENEMY_ZIGZAG_IMG, size=SPRITE_DRAW_SIZE, fallback_color=(170,200,220))
-        super().__init__(pos=pos, hp=1, image=img, player_ref=player_ref)
+    def __init__(self, pos=(240, -50), dy=110, amplitude=70, frequency=1.0, steer_speed=60, player_ref=None):
+        img = load_enemy_image(ENEMY_ZIGZAG_IMG, size=SPRITE_DRAW_SIZE, fallback_color=(170, 200, 220))
+        super().__init__(pos=pos, hp=1, image=img, player_ref=player_ref, size=SPRITE_DRAW_SIZE)
         self.dy = dy
         self.amplitude = amplitude
         self.frequency = frequency
@@ -235,8 +193,7 @@ class ZigZagEnemy(Enemy):
 
     def update(self, dt):
         self._time += dt
-        # movimento zigzag horizontal + tentativa de seguir player
-        zig_x = math.sin(2*math.pi*self.frequency*self._time) * self.amplitude
+        zig_x = math.sin(2 * math.pi * self.frequency * self._time) * self.amplitude
         if self.player_ref is not None:
             target_x = self.player_ref.rect.centerx
             dx = target_x - self.base_x
@@ -244,27 +201,19 @@ class ZigZagEnemy(Enemy):
                 sign = 1 if dx > 0 else -1
                 self.base_x += sign * min(abs(dx), self.steer_speed * dt)
         self.pos.x = self.base_x + zig_x
-
-        # movimento vertical
         self.pos.y += self.dy * dt
-
-        # velocidades aproximadas (para visual)
         self.vx = (self.pos.x - self.rect.x) / max(1e-6, dt)
         self.vy = self.dy
-
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
-
-        # aplica visuais (sem barra)
         self._update_visual_targets(dt)
         self._apply_visual_transform(include_health_bar=False)
 
 
 class FastEnemy(Enemy):
-    """Inimigo rápido que desce e também ajusta X para atingir o player mais agressivamente."""
-    def __init__(self, pos=(240,-50), dy=240, steer_speed=140, player_ref=None):
-        img = load_enemy_image(ENEMY_FAST_IMG, size=SPRITE_DRAW_SIZE, fallback_color=(220,170,170))
-        super().__init__(pos=pos, hp=1, image=img, player_ref=player_ref)
+    def __init__(self, pos=(240, -50), dy=240, steer_speed=140, player_ref=None):
+        img = load_enemy_image(ENEMY_FAST_IMG, size=SPRITE_DRAW_SIZE, fallback_color=(220, 170, 170))
+        super().__init__(pos=pos, hp=1, image=img, player_ref=player_ref, size=SPRITE_DRAW_SIZE)
         self.dy = dy
         self.steer_speed = steer_speed
 
@@ -275,29 +224,20 @@ class FastEnemy(Enemy):
             if abs(dx) > 2:
                 sign = 1 if dx > 0 else -1
                 self.pos.x += sign * min(abs(dx), self.steer_speed * dt)
-
         self.vx = (self.pos.x - self.rect.x) / max(1e-6, dt)
         self.vy = self.dy
         self.pos.y += self.dy * dt
-
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
-
-        # aplica visuais (sem barra)
         self._update_visual_targets(dt)
         self._apply_visual_transform(include_health_bar=False)
 
 
 class ShooterEnemy(Enemy):
-    """
-    Inimigo que desce até uma distância alvo em relação ao player e para,
-    permanecendo parado e atirando periodicamente em direção ao player.
-    Exibe uma barra de vida acima do sprite.
-    """
-    def __init__(self, pos=(240,-50), dy=90, stop_distance=200, shoot_cooldown=1.6,
+    def __init__(self, pos=(240, -50), dy=90, stop_distance=200, shoot_cooldown=1.6,
                  bullet_speed=220, player_ref=None, hp=3):
-        img = load_enemy_image(ENEMY_SHOOTER_IMG, size=SPRITE_DRAW_SIZE, fallback_color=(200,200,160))
-        super().__init__(pos=pos, hp=hp, image=img, player_ref=player_ref)
+        img = load_enemy_image(ENEMY_SHOOTER_IMG, size=SPRITE_DRAW_SIZE, fallback_color=(200, 200, 160))
+        super().__init__(pos=pos, hp=hp, image=img, player_ref=player_ref, size=SPRITE_DRAW_SIZE)
         self.max_hp = hp
         self.dy = dy
         self.stop_distance = stop_distance
@@ -308,7 +248,6 @@ class ShooterEnemy(Enemy):
         self.stopped = False
 
     def update(self, dt):
-        # movimento vertical até parar a uma distância do player
         if not self.stopped:
             if self.player_ref is not None:
                 player_y = self.player_ref.rect.centery
@@ -320,12 +259,9 @@ class ShooterEnemy(Enemy):
                     self.stopped = True
             else:
                 self.pos.y += self.dy * dt
-
-        # atualiza rect
         self.rect.x = int(self.pos.x)
         self.rect.y = int(self.pos.y)
 
-        # tiro
         if self.player_ref is None:
             self._pending_bullet = None
         else:
@@ -348,22 +284,14 @@ class ShooterEnemy(Enemy):
             else:
                 self._pending_bullet = None
 
-        # atualiza velocidades para uso visual
-        # (vx approximated: difference in x over dt)
-        # aqui usamos 0 se dt for muito pequeno; valores usados só para visual
-        # para evitar divisão por zero, não calculamos se não houver referência dt diretamente
-        # Portanto, deixamos vx/vy como zero (visual) e apenas atualizamos yaw com base em direção ao player
         if self.player_ref is not None:
-            # orientação visual: apontar levemente em direção ao player em X
             dx_vis = (self.player_ref.rect.centerx - self.pos.x)
-            # normalize to -1..1 approx
             self.vx = dx_vis / max(1.0, abs(dx_vis))
             self.vy = 0.0
         else:
             self.vx = 0.0
             self.vy = 0.0
 
-        # atualiza visuais e aplica barra de vida
         self._update_visual_targets(dt)
         self._apply_visual_transform(include_health_bar=True)
 
@@ -371,3 +299,80 @@ class ShooterEnemy(Enemy):
         b = self._pending_bullet
         self._pending_bullet = None
         return b
+
+
+class BossEnemy(Enemy):
+    """
+    Boss final:
+    - aparece centralizado, desce lentamente até posição inicial (y = boss_start_y)
+    - depois se move apenas horizontalmente entre limites (bounce)
+    - maior tamanho que inimigos normais; exibe HP no topo-left via Game.draw
+    """
+    def __init__(self, pos=(SCREEN_WIDTH//2, -200), dy=50, start_y=120, hp=40, speed_x=120, player_ref=None):
+        boss_size = (120, 80)  # largura maior e altura aumentada
+        # tenta carregar boss.png com escala, se não existir usa placeholder
+        if os.path.isfile(BOSS_IMG):
+            try:
+                img = pygame.image.load(BOSS_IMG).convert_alpha()
+                img = pygame.transform.smoothscale(img, boss_size)
+            except Exception:
+                img = load_enemy_image(ENEMY_BASIC_IMG, size=boss_size, fallback_color=(180, 60, 60))
+        else:
+            img = load_enemy_image(ENEMY_BASIC_IMG, size=boss_size, fallback_color=(180, 60, 60))
+
+        super().__init__(pos=pos, hp=hp, image=img, player_ref=player_ref, size=boss_size)
+        self.max_hp = hp
+        self.dy = dy
+        self.start_y = start_y
+        self.descended = False
+        self.speed_x = speed_x
+        self.vx = 0.0
+        self.vy = 0.0
+        # horizontal movement bounds (keep boss within screen edges with margin)
+        margin = 40
+        self.min_x = margin
+        self.max_x = SCREEN_WIDTH - margin - boss_size[0]
+        # set initial pos.x to center correctly
+        self.pos.x = pos[0] - boss_size[0] // 2
+        self.pos.y = pos[1]
+        self.rect.x = int(self.pos.x)
+        self.rect.y = int(self.pos.y)
+
+    def update(self, dt):
+        # if not yet at start_y, descend slowly
+        if not self.descended:
+            if self.pos.y < self.start_y:
+                self.pos.y += self.dy * dt
+                self.vy = self.dy
+            else:
+                self.pos.y = self.start_y
+                self.descended = True
+                # start horizontal movement right
+                self.vx = self.speed_x
+        else:
+            # horizontal movement bounce
+            self.pos.x += self.vx * dt
+            # bounce when hitting bounds
+            if self.pos.x < self.min_x:
+                self.pos.x = self.min_x
+                self.vx = abs(self.vx)
+            elif self.pos.x > self.max_x:
+                self.pos.x = self.max_x
+                self.vx = -abs(self.vx)
+
+        # update rect
+        self.rect.x = int(self.pos.x)
+        self.rect.y = int(self.pos.y)
+
+        # set visual velocities for yaw calc
+        self._update_visual_velocities(dt)
+        self._update_visual_targets(dt)
+        # Boss shows health via Game.draw (top-left); still apply visual transform for movement look
+        self._apply_visual_transform(include_health_bar=False)
+
+    def _update_visual_velocities(self, dt):
+        # approximate vx for visual yaw calculation
+        self.vx = (self.rect.x - getattr(self, "_prev_rect_x", self.rect.x)) / max(1e-6, dt)
+        self.vy = 0.0
+        self._prev_rect_x = self.rect.x
+
