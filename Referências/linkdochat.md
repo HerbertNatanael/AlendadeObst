@@ -1,0 +1,1 @@
+Link do histórico do chatGpt, usado como auxílio para a construção do jogo (modelo: GPT 5, lincença Insper edu): https://chatgpt.com/share/e/69147edc-9938-8003-81b0-ec34948ba899
