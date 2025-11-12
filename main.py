@@ -9,3 +9,4 @@ if __name__ == "__main__":
     # Isso permite importar Game em outros testes sem disparar o loop automaticamente.
     game = Game()
     game.run()
+s
