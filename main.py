@@ -1,6 +1,6 @@
 
-# Ponto de entrada do jogo
-# Mantemos esse arquivo mínimo para separar inicialização da lógica do jogo em src/game.py.
+# Ponto de entrada do jogo — instancia a classe Game e inicia o loop principal.
+# Arquivo separado para facilitar testes.
 
 from src.game import Game
 
@@ -9,4 +9,3 @@ if __name__ == "__main__":
     # Isso permite importar Game em outros testes sem disparar o loop automaticamente.
     game = Game()
     game.run()
-s
